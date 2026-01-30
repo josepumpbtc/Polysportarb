@@ -81,6 +81,19 @@ git push -u origin main
 
 **注意**：实盘需小额资金并确认当地合规；建议先用 `PAPER_TRADING=true` 验证。
 
+## 分阶段计划
+
+**当前阶段（测试）**
+
+1. Paper trade：套利机会写入 log（`[PAPER] 套利机会: ...`）。
+2. 套利机会推送 Telegram：配置 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID` 后，每次机会会推送到 Bot。
+3. 仅监控 10 个市场：配置 `max_markets_monitor: 10`（`config/config.yaml` 或默认），后续可改为 100。
+
+**下一阶段（待完成）**
+
+1. 将监控从 10 个市场扩展到 100 个（改 `max_markets_monitor: 100`）。
+2. 实盘下单测试：从 100 USDT 起测（配置 `.env` 与 `default_size`/仓位上限）。
+
 ## 免责声明
 
 本仓库仅供学习与研究。实盘交易有亏损风险，请自行确认 Polymarket 条款与当地法规，仅用可承受损失的资金。

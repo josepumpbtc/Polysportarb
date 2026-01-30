@@ -9,6 +9,8 @@ fee_bps: 0               # 手续费（basis points），按 Polymarket 实际�
 sports_tag_id: null      # Gamma API tag_id，如 100381；null 表示用 /sports 或默认
 events_limit: 50         # 每次拉取 events 数量
 events_offset: 0
+# 测试阶段仅监控 N 个市场；后续可改为 100
+max_markets_monitor: 10
 
 # 订单与风控
 default_size: 5.0        # 默认每腿下单量（美元或 shares，按 CLOB 定义）

@@ -90,38 +90,41 @@ def run_websocket_loop(
     store: OrderBookStore,
     asset_ids: List[str],
     url: str = WSS_MARKET_URL,
+    reconnect_delay_sec: float = 5.0,
 ) -> None:
     """
     目的：在后台线程中连接 WebSocket 并持续接收消息，更新 store
-    方法：连接 url，发送订阅消息 {"assets_ids": asset_ids, "type": "MARKET"}，循环 recv 并 store.update_from_message
+    方法：连接 url，发送订阅消息 {"assets_ids": asset_ids, "type": "MARKET"}，循环 recv 并 store.update_from_message；断线后等待 reconnect_delay_sec 再重连
     注意：需在单独线程中调用，否则会阻塞；主程序可用 store 读 best bid/ask
     """
     try:
         import websocket
     except ImportError:
         return
-    ws = websocket.create_connection(url)
-    # 方法：文档要求 type 为 MARKET，assets_ids 为 token ID 数组
-    sub = {"assets_ids": [str(a) for a in asset_ids], "type": "MARKET"}
-    ws.send(json.dumps(sub))
-    try:
-        while True:
-            raw = ws.recv()
-            if not raw:
-                break
-            try:
-                msg = json.loads(raw)
-                # 方法：可能是 { "event_type": "book", "asset_id": "...", ... } 或 price_change
-                if isinstance(msg, dict):
-                    store.update_from_message(msg)
-                elif isinstance(msg, list):
-                    for m in msg:
-                        if isinstance(m, dict):
-                            store.update_from_message(m)
-            except json.JSONDecodeError:
-                pass
-    finally:
+    import time
+    while True:
+        try:
+            ws = websocket.create_connection(url)
+            sub = {"assets_ids": [str(a) for a in asset_ids], "type": "MARKET"}
+            ws.send(json.dumps(sub))
+            while True:
+                raw = ws.recv()
+                if not raw:
+                    break
+                try:
+                    msg = json.loads(raw)
+                    if isinstance(msg, dict):
+                        store.update_from_message(msg)
+                    elif isinstance(msg, list):
+                        for m in msg:
+                            if isinstance(m, dict):
+                                store.update_from_message(m)
+                except json.JSONDecodeError:
+                    pass
+        except Exception:
+            pass
         try:
             ws.close()
         except Exception:
             pass
+        time.sleep(reconnect_delay_sec)

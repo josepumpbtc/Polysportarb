@@ -5,6 +5,7 @@ import argparse
 import logging
 import os
 import sys
+import threading
 import time
 from typing import Any, Dict, List, Optional
 
@@ -13,11 +14,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config_loader import load_config
 from src.gamma import fetch_sports_binary_markets
-from src.orderbook import OrderBookStore
+from src.orderbook import OrderBookStore, run_websocket_loop
 from src.arbitrage import scan_markets_for_arbitrage, ArbitrageSignal
 from src.volatility import scan_markets_for_volatility
 from src.volatility import VolatilityDetector
 from src.execution import execute_arbitrage
+from src.telegram_notify import notify_arb_opportunity
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,7 +55,10 @@ def run_once(
         default_size=config.get("default_size", 5.0),
     )
     for sig in arb_signals:
+        # 1. 套利机会写入 log（paper 时 execute_arbitrage 会打 [PAPER] 套利机会）
         execute_arbitrage(sig, client=client, paper=paper)
+        # 2. 套利机会推送 Telegram（需配置 TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID）
+        notify_arb_opportunity(sig)
 
     # 波动策略（可选）
     if config.get("volatility_enabled"):
@@ -109,15 +114,31 @@ def main(
     if not markets:
         logger.warning("当前无体育二元市场，将空跑主循环（可手动注入 markets 测试）")
 
+    # 3. 测试阶段仅监控 N 个市场（默认 10）；后续可改为 100
+    max_markets = int(config.get("max_markets_monitor", 10))
+    markets = markets[:max_markets]
+    logger.info("监控市场数量: %d（max_markets_monitor=%d）", len(markets), max_markets)
+
     store = OrderBookStore()
-    # 方法：若无 WebSocket 线程，可在此用 mock 数据 update_from_message 做纸面测试
-    asset_ids = []
+    # 方法：仅从上述 N 个市场收集 YES/NO token_id，供 WebSocket 订阅
+    asset_ids: List[str] = []
     for m in markets:
         asset_ids.append(m["token_id_yes"])
         asset_ids.append(m["token_id_no"])
     asset_ids = list(dict.fromkeys(asset_ids))
+    # 启动 WebSocket 线程，持续接收订单簿并更新 store，主循环才能读到 orderbook 并产生套利信号
     if asset_ids:
-        logger.info("订阅 %d 个 asset_ids（实际 WebSocket 需在 run_websocket_loop 中启动）", len(asset_ids))
+        subscribe_ids = asset_ids
+        ws_thread = threading.Thread(
+            target=run_websocket_loop,
+            args=(store, subscribe_ids),
+            daemon=True,
+            name="orderbook-ws",
+        )
+        ws_thread.start()
+        logger.info("已启动 orderbook WebSocket，订阅 %d 个 asset_ids", len(subscribe_ids))
+        # 等待首批订单簿数据写入 store，再开始主循环检测
+        time.sleep(3)
 
     volatility_detectors: Dict[str, VolatilityDetector] = {}
     logger.info("主循环启动，paper=%s，poll_interval=%.1fs", paper, poll_interval_sec)

@@ -16,6 +16,7 @@ DEFAULTS: Dict[str, Any] = {
     "min_book_depth": 10.0,
     "volatility_enabled": False,
     "volatility_deviation_pct": 0.05,
+    "max_markets_monitor": 10,  # 测试阶段仅监控 N 个市场；后续可改为 100
 }
 
 
