@@ -50,8 +50,8 @@ def log_task_status_and_workbook(
         cid = m.get("condition_id", "")
         q = (m.get("question") or "")[:60]
         logger.info("  市场 %d: condition_id=%s question=%s", i, cid, q)
-    # Workbook 样子：每个市场 YES/NO 的 best bid/ask；排除 bid=0.01 ask=0.99 等不活跃
-    logger.info("【Workbook】订单簿快照 (bid/ask)，已排除不活跃市场 (概率 >99%% 或 <1%%)")
+    # Workbook：仅输出活跃市场（不活跃的不显示在 Log 中）
+    logger.info("【Workbook】订单簿快照 (仅活跃市场)")
     active_count = 0
     for m in markets:
         ty = m.get("token_id_yes")
@@ -62,12 +62,10 @@ def log_task_status_and_workbook(
         bn = store.get_best_bid(tn) if tn else None
         an = store.get_best_ask(tn) if tn else None
         if _is_inactive_book(by, ay) and _is_inactive_book(bn, an):
-            logger.info("  [不活跃] %s | YES bid=%s ask=%s | NO bid=%s ask=%s", q, by, ay, bn, an)
             continue
         active_count += 1
         logger.info("  %s | YES bid=%s ask=%s | NO bid=%s ask=%s", q, by, ay, bn, an)
-    if active_count < len(markets):
-        logger.info("  共 %d 个市场有订单簿，%d 个已过滤为不活跃", len(markets), len(markets) - active_count)
+    logger.info("【Workbook】活跃市场 %d 个（共监控 %d 个，已过滤不活跃 %d 个）", active_count, len(markets), len(markets) - active_count)
 
 
 def run_once(
@@ -97,10 +95,16 @@ def run_once(
         default_size=config.get("default_size", 5.0),
     )
     for sig in arb_signals:
-        # 1. 套利机会写入 log（paper 时 execute_arbitrage 会打 [PAPER] 套利机会）
+        # 1. Deploy Log 醒目显示套利机会
+        logger.info(
+            "【套利机会】%s | YES=%.3f NO=%.3f 合计=%.3f | 预期利润=%.2f",
+            (sig.question or "套利")[:60], sig.price_yes, sig.price_no, sig.price_yes + sig.price_no, sig.expected_profit,
+        )
+        # 2. 执行层（paper 时只打 [PAPER] 明细）
         execute_arbitrage(sig, client=client, paper=paper)
-        # 2. 套利机会推送 Telegram（需配置 TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID）
-        notify_arb_opportunity(sig)
+        # 3. 套利机会推送到 Telegram
+        if notify_arb_opportunity(sig):
+            logger.info("套利机会已推送 Telegram")
 
     # 波动策略（可选）
     if config.get("volatility_enabled"):
