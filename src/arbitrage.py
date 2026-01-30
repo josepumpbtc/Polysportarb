@@ -39,6 +39,9 @@ def check_arbitrage(
     ask_no = get_best_ask(token_id_no)
     if ask_yes is None or ask_no is None:
         return None
+    # 排除不活跃/极端概率市场：YES 或 NO 的 ask 在 0.01 或 0.99 附近视为无真实交易
+    if ask_yes <= 0.01 or ask_yes >= 0.99 or ask_no <= 0.01 or ask_no >= 0.99:
+        return None
 
     fee = fee_bps / 10000.0 if fee_bps else 0.0
     sum_ask = ask_yes + ask_no

@@ -54,3 +54,24 @@ def notify_arb_opportunity(signal: ArbitrageSignal) -> bool:
     """
     text = format_arb_opportunity(signal)
     return send_telegram_message(text)
+
+
+def notify_startup() -> bool:
+    """
+    目的：启动时发送一条测试消息到 Telegram，便于排查 Railway 上未收到推送
+    方法：发送「Polysportarb 已启动」；未配置 TELEGRAM_* 或发送失败时返回 False 并打 log
+    """
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    cid = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not cid:
+        logger.info(
+            "Telegram 未配置: TELEGRAM_BOT_TOKEN=%s TELEGRAM_CHAT_ID=%s",
+            "已设置" if token else "未设置",
+            "已设置" if cid else "未设置",
+        )
+        return False
+    text = "Polysportarb 已启动（Paper 模式）"
+    ok = send_telegram_message(text, bot_token=token, chat_id=cid)
+    if not ok:
+        logger.warning("Telegram 启动测试消息发送失败，请检查 BOT_TOKEN 与 CHAT_ID 是否正确")
+    return ok

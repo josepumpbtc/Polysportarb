@@ -19,7 +19,7 @@ from src.arbitrage import scan_markets_for_arbitrage, ArbitrageSignal
 from src.volatility import scan_markets_for_volatility
 from src.volatility import VolatilityDetector
 from src.execution import execute_arbitrage
-from src.telegram_notify import notify_arb_opportunity
+from src.telegram_notify import notify_arb_opportunity, notify_startup
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,19 +28,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _is_inactive_book(bid: Optional[float], ask: Optional[float]) -> bool:
+    """YES/NO 为 bid=0.01 ask=0.99 或 0.001/0.999 等视为无活跃交易，过滤不输出"""
+    if bid is None or ask is None:
+        return True
+    return (bid <= 0.02 and ask >= 0.98) or (bid <= 0.002 and ask >= 0.998)
+
+
 def log_task_status_and_workbook(
     store: OrderBookStore,
     markets: List[Dict[str, Any]],
     status: str = "运行中",
+    top_n_label: Optional[str] = None,
 ) -> None:
-    """目的：在 Deploy Logs 中输出任务状态、监控市场列表、订单簿摘要（Workbook 样子）"""
-    logger.info("【任务状态】%s", status)
+    """目的：在 Deploy Logs 中输出任务状态、监控市场列表、订单簿摘要（Workbook 样子）；排除不活跃市场"""
+    if top_n_label:
+        logger.info("【%s】%s", top_n_label, status)
+    else:
+        logger.info("【任务状态】%s", status)
     for i, m in enumerate(markets, 1):
         cid = m.get("condition_id", "")
         q = (m.get("question") or "")[:60]
         logger.info("  市场 %d: condition_id=%s question=%s", i, cid, q)
-    # Workbook 样子：每个市场 YES/NO 的 best bid / best ask
-    logger.info("【Workbook】订单簿快照 (bid/ask)")
+    # Workbook 样子：每个市场 YES/NO 的 best bid/ask；排除 bid=0.01 ask=0.99 等不活跃
+    logger.info("【Workbook】订单簿快照 (bid/ask)，已排除不活跃市场 (概率 >99%% 或 <1%%)")
+    active_count = 0
     for m in markets:
         ty = m.get("token_id_yes")
         tn = m.get("token_id_no")
@@ -49,10 +61,13 @@ def log_task_status_and_workbook(
         ay = store.get_best_ask(ty) if ty else None
         bn = store.get_best_bid(tn) if tn else None
         an = store.get_best_ask(tn) if tn else None
-        logger.info(
-            "  %s | YES bid=%s ask=%s | NO bid=%s ask=%s",
-            q, by, ay, bn, an,
-        )
+        if _is_inactive_book(by, ay) and _is_inactive_book(bn, an):
+            logger.info("  [不活跃] %s | YES bid=%s ask=%s | NO bid=%s ask=%s", q, by, ay, bn, an)
+            continue
+        active_count += 1
+        logger.info("  %s | YES bid=%s ask=%s | NO bid=%s ask=%s", q, by, ay, bn, an)
+    if active_count < len(markets):
+        logger.info("  共 %d 个市场有订单簿，%d 个已过滤为不活跃", len(markets), len(markets) - active_count)
 
 
 def run_once(
@@ -177,8 +192,19 @@ def main(
     def get_asset_ids() -> List[str]:
         return list(current_asset_ids)
 
-    # Deploy Logs：输出任务状态与监控的市场列表
-    log_task_status_and_workbook(store, current_markets, status="主循环启动前，监控市场列表")
+    # Deploy Logs：输出任务状态与监控的市场列表（Top 100 时打【Top 100 监控市场】）
+    top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
+    log_task_status_and_workbook(
+        store, current_markets,
+        status="主循环启动前，监控市场列表",
+        top_n_label=top_label,
+    )
+
+    # Telegram 启动测试：便于排查 Railway 上未收到推送
+    if notify_startup():
+        logger.info("Telegram 已配置，已发送启动测试消息")
+    else:
+        logger.info("Telegram 未配置或发送失败（检查 TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID）")
 
     # 启动 WebSocket 线程，持续接收订单簿并更新 store；传入 getter 以便定期刷新后重连时订阅新 asset_ids
     if current_asset_ids:
@@ -191,7 +217,10 @@ def main(
         ws_thread.start()
         logger.info("已启动 orderbook WebSocket，订阅 %d 个 asset_ids", len(current_asset_ids))
         time.sleep(3)
-        log_task_status_and_workbook(store, current_markets, status="首批订单簿已就绪，Workbook 快照")
+        top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
+        log_task_status_and_workbook(
+            store, current_markets, status="首批订单簿已就绪，Workbook 快照", top_n_label=top_label,
+        )
 
     volatility_detectors: Dict[str, VolatilityDetector] = {}
     logger.info("主循环启动，paper=%s，poll_interval=%.1fs", paper, poll_interval_sec)
@@ -204,7 +233,10 @@ def main(
             run_once(config, store, current_markets, paper, client, volatility_detectors)
             now = time.monotonic()
             if now - last_status_log >= status_log_interval:
-                log_task_status_and_workbook(store, current_markets, status="主循环运行中")
+                top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
+                log_task_status_and_workbook(
+                    store, current_markets, status="主循环运行中", top_n_label=top_label,
+                )
                 last_status_log = now
             # 未指定 monitor_condition_ids 时，定期刷新 top 市场并更新 current_markets / current_asset_ids
             if not monitor_set and now - last_refresh >= refresh_interval:
