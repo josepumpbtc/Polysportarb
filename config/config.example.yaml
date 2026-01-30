@@ -11,18 +11,18 @@ events_limit: 50         # 每次拉取 events 数量
 events_offset: 0
 # 测试阶段仅监控 N 个市场；后续可改为 100
 max_markets_monitor: 10
-# 指定监控的 10 个二元市场（condition_id）；若为空则取拉取结果的前 max_markets_monitor 个
+# 指定监控的 10 个二元市场：交易量 top10，且 0.01 < 概率 < 0.99；若为空则取拉取结果的前 max_markets_monitor 个
 monitor_condition_ids:
-  - "0x19ee98e348c0ccb341d1b9566fa14521566e9b2ea7aed34dc407a0ec56be36a2"  # MicroStrategy sells any Bitcoin in 2025?
-  - "0x8213d395e079614d6c4d7f4cbb9be9337ab51648a21cc2a334ae8f1966d164b4"  # MicroStrategy sells any Bitcoin by Dec 31, 2026?
-  - "0x9a4db724246b51cbfbc8000dbbd6b54d72b057767c3690e63d940b26d78c6cb0"  # MicroStrategy sells any Bitcoin by Mar 31, 2026?
-  - "0x5b70123b2c37355840b38bc60752919dae7ca5fe11d5e5184aa69be01b9db458"  # Kraken IPO in 2025?
-  - "0x9b3c3177fe473124c756b01e123b4b03e3a99880844ed8dea21b0a7879ca04aa"  # Kraken IPO by Mar 31, 2026?
-  - "0x6301809524e73edb9ab1bd180101ae6d9588ba78075a64c479f334a6d2a12975"  # Macron out in 2025?
-  - "0xda5c517dd5b78c80dec8ceb08ca4f466317633487827d7290332b4851cc4a4fa"  # Macron out by June 30, 2026?
-  - "0xaf9d0e448129a9f657f851d49495ba4742055d80e0ef1166ba0ee81d4d594214"  # Will Trump deport less than 250,000?
-  - "0x49686d26fb712515cd5e12c23f0a1c7e10214c7faa3cb0a730aabe0c33694082"  # Will Trump deport 250,000-500,000?
-  - "0x2393ed0b0fdc450054c7b9071907eca75cf4fc36e385adf4a0a5f99ee62243e8"  # Will Trump deport 500,000-750,000?
+  - "0x450810ae738a0ff820d3248f2b24937f63fb8c8cf422ed2a915125adb4d9d3c8"  # Andrew Yang 2028 Dem
+  - "0xc914317b14972d5d15f30740d3bdf32f4028877c13b9d7ccc78b4ba33f67fb1e"  # Patriots Super Bowl 2026
+  - "0xbcb33ad98c8141b10f2350ef687eddf0660484ecc15be42ecdae64339e64dce1"  # André Ventura Portugal 2026
+  - "0x2ca58175aa8080357d9706c535bb0be218ce7bb156dc48753e0d8b8ee6b56635"  # Aston Villa Premier League 2025-26
+  - "0x1d54eb5eac2cee8f595f3097c65da7d07f8ab5dee63d7c0c6883eb70e1e9af30"  # Russia Ukraine ceasefire Mar 2026
+  - "0xa0eafdfa7da17483796f77f4b287d28834ab97db4a9a6e999b52c1ba239bc2f3"  # Seahawks Super Bowl 2026
+  - "0xf2cea45ec282af4f302d2ab85ede73678cd692ebf8c3ab6d52bfa5e19f44c553"  # Matt Gaetz 2028 Rep
+  - "0x32b09f6390252b37d674501527e709016d55581b2c1e544bd4b8167f5f732f4c"  # Jesus return before GTA VI
+  - "0xd997dc2a212a7d6673375a3b016db1fb214247142f8cde0cbf07f8e6d789877c"  # Vivek Ramaswamy 2028 Rep
+  - "0xaeea5f917fc5746387b5f9c0a4263dba035dbb3f0ac6ad72bf92183d21e26739"  # Russia Ukraine ceasefire end 2026
 
 # 订单与风控
 default_size: 5.0        # 默认每腿下单量（美元或 shares，按 CLOB 定义）
