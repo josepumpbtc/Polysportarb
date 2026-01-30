@@ -1,0 +1,18 @@
+# 目的：避免将敏感信息与构建产物提交到 Git
+
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+.DS_Store
+.idea/
+.vscode/

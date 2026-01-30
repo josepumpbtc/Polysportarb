@@ -1,0 +1,20 @@
+# 目的：策略与运行参数示例，复制为 config.yaml 后按需修改
+# 方法：main 启动时加载，敏感信息仍用环境变量
+
+# 套利参数
+min_profit: 0.005        # 最小利润阈值（美元），低于此不触发
+fee_bps: 0               # 手续费（basis points），按 Polymarket 实际填写
+
+# 体育市场筛选
+sports_tag_id: null      # Gamma API tag_id，如 100381；null 表示用 /sports 或默认
+events_limit: 50         # 每次拉取 events 数量
+events_offset: 0
+
+# 订单与风控
+default_size: 5.0        # 默认每腿下单量（美元或 shares，按 CLOB 定义）
+max_position_per_market: 50.0   # 单市场最大持仓
+min_book_depth: 10.0     # 订单簿最小深度才参与套利
+
+# 波动策略（可选）
+volatility_enabled: false
+volatility_deviation_pct: 0.05  # 价格偏离近期均值超过 5% 才发信号
