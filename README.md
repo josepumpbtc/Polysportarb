@@ -233,15 +233,27 @@ git push -u origin main
 
 ## Railway 部署
 
+详细部署配置请参考 **[docs/RAILWAY_SETUP.md](docs/RAILWAY_SETUP.md)**。
+
+### 快速开始
+
 1. 在 [Railway](https://railway.app) 新建项目，选择 **Deploy from GitHub repo**，连接 `josepumpbtc/Polysportarb`。
 2. 在 Service 的 **Variables** 中配置环境变量（勿提交到 Git）：
    - `PRIVATE_KEY`：钱包私钥
    - `FUNDER_ADDRESS`：Polymarket 代理钱包地址
    - `PAPER_TRADING`：`true` 为纸面（只打 log），`false` 为实盘
-   - 可选：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`（套利机会推送到 Telegram，见 [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md)）
+   - `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`：Telegram 通知配置（推荐配置，见 [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md)）
    - 可选：`API_KEY`、`API_SECRET`、`API_PASSPHRASE`（不填则 L1 自动派生）
-3. 构建与启动：Railway 使用 `requirements.txt` 构建；启动命令为 `python -u -m src.main`（`-u` 关闭输出缓冲，Deploy Logs 才能实时看到日志）。建议在 **Variables** 中加 `PYTHONUNBUFFERED=1` 作为备用。
-4. 部署后服务会持续运行主循环；日志在 Railway 控制台查看。
+3. **启用三种套利策略**（在 Railway Variables 中设置）：
+   ```bash
+   MERGE_ARB_ENABLED=true   # Taker 套利（默认启用）
+   SPLIT_ARB_ENABLED=true   # Split 套利（默认启用）
+   MAKER_ARB_ENABLED=true   # Maker 套利（可选，默认关闭）
+   MIN_PROFIT=0.05          # 最小利润阈值（测试时可设为 0.05）
+   LIVE_SPORTS_ENABLED=true # 监控 Live 体育市场（推荐）
+   ```
+4. 构建与启动：Railway 使用 `requirements.txt` 构建；启动命令为 `python -u -m src.main`。建议在 **Variables** 中加 `PYTHONUNBUFFERED=1`。
+5. 部署后服务会持续运行主循环；日志在 Railway 控制台查看，套利机会会推送到 Telegram。
 
 **注意**：实盘需小额资金并确认当地合规；建议先用 `PAPER_TRADING=true` 验证。
 
