@@ -220,8 +220,10 @@ def fetch_live_sports_binary_markets(
 ) -> List[Dict[str, Any]]:
     """
     目的：拉取正在进行的（live）体育市场，用于监控实时交易量大的体育比赛
-    方法：使用 tag_slug="sports" 获取体育 events，过滤 live=true，转换为二元市场列表
-    注意：优先使用 tag_slug="sports" 来准确获取体育事件，如果没有提供则使用 tag_id
+    方法：使用 tag_slug="sports" 获取体育 events，检查 event 级别的 live 字段（主要判断依据），
+         如果 event 是 live，则包含该 event 下的所有二元 markets
+    注意：根据实际测试，live 状态主要在 event 级别（ev.get("live") is True），
+         market 级别的 live 字段通常为 None，但也会检查作为备用
     """
     # 优先使用 tag_slug 获取体育事件，否则使用 tag_id
     if tag_slug:
@@ -229,15 +231,117 @@ def fetch_live_sports_binary_markets(
     else:
         events = fetch_events(tag_id=tag_id, closed=False, limit=limit, offset=offset)
     
-    # 过滤 live=true 的事件
-    live_events = []
+    # 转换为二元市场列表，但只保留 live events 下的 markets
+    out: List[Dict[str, Any]] = []
     for ev in events:
-        # 检查 event 的 live 字段（必须是 True，不能只是 truthy）
-        if ev.get("live") is True:
-            live_events.append(ev)
+        # 主要检查：event 级别的 live 字段（这是最可靠的判断依据）
+        # 备用检查：market 级别的 live 字段
+        event_is_live = ev.get("live") is True
+        
+        markets = ev.get("markets") or ev.get("market") or []
+        if not isinstance(markets, list):
+            markets = [markets] if isinstance(markets, dict) else []
+        
+        for m in markets:
+            if not isinstance(m, dict):
+                continue
+            
+            # 如果 event 不是 live，检查 market 级别的 live 字段作为备用
+            if not event_is_live:
+                market_is_live = m.get("live") is True
+                if not market_is_live:
+                    continue
+            
+            tokens = _parse_market_tokens(m)
+            if not tokens:
+                continue
+            if _is_market_ended(m, ev):
+                continue
+            condition_id = m.get("conditionId") or m.get("condition_id") or ""
+            if not condition_id:
+                continue
+            out.append({
+                "condition_id": condition_id,
+                "token_id_yes": tokens["yes"],
+                "token_id_no": tokens["no"],
+                "event_slug": ev.get("slug") or ev.get("id") or "",
+                "question": m.get("question") or m.get("title") or "",
+            })
+    return out
+
+
+def _is_event_live_by_slug(event_slug: str, timeout: int = 5) -> bool:
+    """
+    目的：通过 event_slug 检查 event 是否是 live 状态
+    方法：获取 event 并检查 event 级别的 live 字段
+    """
+    if not event_slug:
+        return False
+    try:
+        event = fetch_event_by_slug(event_slug, timeout=timeout)
+        if not event:
+            return False
+        # 检查 event 级别的 live 字段（主要判断依据）
+        return event.get("live") is True
+    except Exception:
+        # 如果获取失败，返回 False（保守策略）
+        return False
+
+
+def _filter_markets_by_live_events(
+    markets: List[Dict[str, Any]],
+    events: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """
+    目的：根据 events 的 live 状态过滤 markets
+    方法：创建一个 event_slug -> live_status 的映射，以及 condition_id -> live_status 的映射，然后过滤 markets
+    """
+    # 创建 event_slug -> live_status 映射
+    event_live_map: Dict[str, bool] = {}
+    # 创建 condition_id -> live_status 映射（通过遍历 events 中的 markets）
+    condition_live_map: Dict[str, bool] = {}
     
-    # 转换为二元市场列表
-    return events_to_binary_markets(live_events)
+    for ev in events:
+        event_slug = ev.get("slug") or ev.get("id") or ""
+        event_is_live = ev.get("live") is True
+        
+        if event_slug:
+            event_live_map[event_slug] = event_is_live
+        
+        # 遍历 event 下的所有 markets，建立 condition_id -> live_status 映射
+        markets_in_event = ev.get("markets") or ev.get("market") or []
+        if not isinstance(markets_in_event, list):
+            markets_in_event = [markets_in_event] if isinstance(markets_in_event, dict) else []
+        
+        for m in markets_in_event:
+            if not isinstance(m, dict):
+                continue
+            cid = m.get("conditionId") or m.get("condition_id") or ""
+            if cid:
+                condition_live_map[cid] = event_is_live
+    
+    # 过滤 markets：只保留 live=True 的 event 下的 markets
+    filtered: List[Dict[str, Any]] = []
+    for m in markets:
+        condition_id = m.get("condition_id") or ""
+        event_slug = m.get("event_slug") or ""
+        
+        # 优先通过 condition_id 匹配
+        if condition_id and condition_id in condition_live_map:
+            if condition_live_map[condition_id]:
+                filtered.append(m)
+            # 如果 condition_id 匹配但 live=False，则跳过
+        # 其次通过 event_slug 匹配
+        elif event_slug and event_slug in event_live_map:
+            if event_live_map[event_slug]:
+                filtered.append(m)
+            # 如果 event_slug 匹配但 live=False，则跳过
+        else:
+            # 如果没有匹配到，保留（保守策略，避免过滤掉有效市场）
+            # 这可能发生在 markets API 不包含 event 信息的情况下
+            filtered.append(m)
+    
+    return filtered
 
 
 def fetch_top10_binary_markets_by_volume(
@@ -250,6 +354,7 @@ def fetch_top10_binary_markets_by_volume(
     目的：拉取二元市场后按「仅 24 小时」交易量排序，过滤概率在 (min_prob, max_prob) 内，返回 top N
     活跃市场定义：Top 100 Polymarket 24h 交易量（不看历史总交易量），且 0.01 < YES 概率 < 0.99
     方法：GET /markets 按 volume24hrClob 降序，只取 volume24hr/volume24hrClob 作为排序依据，过滤已结束与极端概率
+    注意：此函数返回所有符合条件的 top N 市场（不过滤 live 状态），与 live events 市场合并后可以增加活跃市场数量
     """
     import json
     # 仅用 24h 交易量：直接请求 /markets 按 volume24hrClob 降序
@@ -293,16 +398,18 @@ def fetch_top10_binary_markets_by_volume(
         if yes_p <= min_prob or yes_p >= max_prob:
             continue
         q = m.get("question") or m.get("title") or ""
-        cands.append((vol, cid, tokens["yes"], tokens["no"], q))
+        # 尝试从 markets API 获取 event_slug（可能不存在）
+        event_slug = m.get("eventSlug") or m.get("event_slug") or m.get("slug") or ""
+        cands.append((vol, cid, tokens["yes"], tokens["no"], q, event_slug))
     # 已按 API 的 volume24hrClob 顺序返回，再按 vol 降序取前 top_n（保证只用 24h）
     cands.sort(key=lambda x: -x[0])
     out: List[Dict[str, Any]] = []
-    for _, cid, ty, tn, q in cands[:top_n]:
+    for _, cid, ty, tn, q, event_slug in cands[:top_n]:
         out.append({
             "condition_id": cid,
             "token_id_yes": ty,
             "token_id_no": tn,
             "question": q,
-            "event_slug": "",
+            "event_slug": event_slug,
         })
     return out
