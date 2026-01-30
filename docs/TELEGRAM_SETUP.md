@@ -2,6 +2,8 @@
 
 套利机会出现时，程序会向 Telegram 发送一条消息。需要配置 **Bot** 和 **接收位置**（私聊或 Channel），并把 token 与 chat_id 写入环境变量。
 
+**推送到 Channel @polysportarb**：将 Bot 加为 @polysportarb 管理员后，设置 `TELEGRAM_CHAT_ID=@polysportarb` 即可。
+
 ---
 
 ## 1. 创建 Bot 并获取 Token
@@ -28,17 +30,14 @@
 
 ### 方式 B：推送到「Channel」（群组/频道收）
 
-1. 创建一个 **Channel**（或使用已有 Channel）：Telegram → 菜单 → New Channel → 起名、设为公开或私有。
+1. 创建一个 **Channel**（或使用已有 Channel）：Telegram → 菜单 → New Channel → 起名、设为**公开**并设置 username（例如 `polysportarb`），或使用已有公开 Channel。
 2. 把 Bot **加为管理员**：Channel 设置 → Administrators → Add Administrator → 搜索你的 Bot → 至少勾选 **Post messages**（或允许发消息的权限）。
-3. 获取 Channel 的 **chat_id**：
-   - Channel 的 chat_id 格式为 **`-100` + 频道数字 id**（例如 `-1001234567890`）。
-   - 方法一：把 Bot 加为管理员后，在 Channel 里发一条消息，然后访问：
-     ```
-     https://api.telegram.org/bot<你的 Bot Token>/getUpdates
-     ```
-     在返回的 JSON 里找到 `"chat":{"id": -1001234567890, ...}`，**-1001234567890** 就是 Channel 的 **chat_id**。
-   - 方法二：若 Channel 为公开，Channel 的 username 为 `@xxx`，则 chat_id 可用 `@xxx`（部分客户端/API 支持）；本程序当前只支持**数字 chat_id**，因此建议用 getUpdates 拿到数字 id。
-4. 把该数字（带负号）保存为环境变量 **`TELEGRAM_CHAT_ID`**（例如 `-1001234567890`）。
+3. 设置 **TELEGRAM_CHAT_ID**（二选一）：
+   - **推荐：公开 Channel 用 @username**  
+     若 Channel 为公开且 username 为 `@polysportarb`，直接设置 **`TELEGRAM_CHAT_ID=@polysportarb`** 即可，套利机会会推送到该 Channel。
+   - 或使用数字 **chat_id**（适用于私有 Channel 或不想暴露 username 时）：  
+     把 Bot 加为管理员后，在 Channel 里发一条消息，访问 `https://api.telegram.org/bot<你的 Bot Token>/getUpdates`，在 JSON 里找到 `"chat":{"id": -1001234567890, ...}`，将 **-1001234567890** 设为 **`TELEGRAM_CHAT_ID`**。
+4. 将上述值保存为环境变量 **`TELEGRAM_CHAT_ID`**（例如 `@polysportarb` 或 `-1001234567890`）。
 
 ---
 
@@ -53,16 +52,16 @@
 
 - **Railway**：在对应 Service 的 **Variables** 里添加：
   - `TELEGRAM_BOT_TOKEN` = 你的 Bot Token
-  - `TELEGRAM_CHAT_ID` = 你的 chat_id（私聊或 Channel 的数字 id）
+  - `TELEGRAM_CHAT_ID` = 私聊填数字 id；**推送到 Channel @polysportarb 时填 `@polysportarb`**
 
-保存后重启/重新部署，有套利机会时就会推送到该 Bot 的私聊或 Channel。
+保存后重启/重新部署，有套利机会时就会推送到该 Bot 的私聊或 Channel（如 @polysportarb）。
 
 ---
 
 ## 4. 校验是否生效
 
 - 不配置 `TELEGRAM_BOT_TOKEN` 或 `TELEGRAM_CHAT_ID` 时，程序照常运行，只是不发送 Telegram 消息。
-- 配置后，出现套利机会时会在对应私聊或 Channel 收到一条「🔔 套利机会」消息；若收不到，请检查：
+- 配置后，出现套利机会时会在对应私聊或 Channel（如 @polysportarb）收到一条「🔔 套利机会」消息；若收不到，请检查：
   - Token 是否完整、无多余空格；
-  - chat_id 是否为数字（Channel 为负数）；
+  - TELEGRAM_CHAT_ID 是否正确（私聊为数字；Channel 为 @polysportarb 或 -100 开头的数字）；
   - Bot 是否已加入 Channel 且具备发消息权限（若用 Channel）。

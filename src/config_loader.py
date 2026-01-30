@@ -16,13 +16,20 @@ DEFAULTS: Dict[str, Any] = {
     "min_book_depth": 10.0,
     "volatility_enabled": False,
     "volatility_deviation_pct": 0.05,
-    "max_markets_monitor": 100,  # 监控 N 个市场（按成交量 top 或 monitor_condition_ids）
+    "max_markets_monitor": 100,  # 监控 N 个市场（按成交量 top、live_sports_enabled 或 monitor_condition_ids）
+    "live_sports_enabled": False,  # Live 体育市场监控（测试用）：监控正在进行的体育比赛
+    "merge_arb_enabled": True,  # 启用 Merge 套利（Taker：买入 YES+NO，等待结算或合并成 USDC）
+    "split_arb_enabled": True,  # 启用 Split 套利（用 USDC 拆分成 YES+NO，然后卖出，瞬间结算）
+    "instant_merge": False,  # Merge 套利是否立即合并成 USDC（false 表示等待事件结算）
+    "maker_arb_enabled": False,  # 启用 Maker 套利（在 YES 和 NO 两边挂 Maker 买单，等待成交，可能获得返佣）
+    "maker_bid_spread": 0.01,  # Maker 买单价格低于 best ask 的价差（例如 0.01 = 1 cent）
+    "maker_order_timeout_sec": 300.0,  # Maker 订单超时时间（秒），超时后考虑撤单或转为 Taker
     "top10_min_prob": 0.01,
     "top10_max_prob": 0.99,
     "status_log_interval_sec": 60.0,  # 每 N 秒在 Deploy Logs 输出任务状态与 Workbook
-    "refresh_markets_interval_sec": 1800.0,  # 未指定 monitor_condition_ids 时，每 N 秒刷新一次 top 市场
+    "refresh_markets_interval_sec": 1800.0,  # 未指定 monitor_condition_ids 时，每 N 秒刷新一次市场
     "heartbeat_interval_sec": 3600.0,  # 每小时推送 Telegram 心跳「策略正在 Railway 运行中」
-    # 为空则按「Top 100 Polymarket 24h 交易量」动态拉取；非空则只监控这些 condition_id
+    # 为空则按优先级：live_sports_enabled > Top 100 Polymarket 24h 交易量；非空则只监控这些 condition_id
     "monitor_condition_ids": [],
 }
 

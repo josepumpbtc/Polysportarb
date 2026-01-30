@@ -13,13 +13,26 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config_loader import load_config
-from src.gamma import fetch_sports_binary_markets, fetch_top10_binary_markets_by_volume
+from src.gamma import fetch_sports_binary_markets, fetch_top10_binary_markets_by_volume, fetch_live_sports_binary_markets
 from src.orderbook import OrderBookStore, run_websocket_loop
-from src.arbitrage import scan_markets_for_arbitrage, ArbitrageSignal
+from src.arbitrage import (
+    scan_markets_for_arbitrage,
+    ArbitrageSignal,
+    scan_markets_for_split_arbitrage,
+    SplitArbitrageSignal,
+    scan_markets_for_maker_arbitrage,
+    MakerArbitrageSignal,
+)
 from src.volatility import scan_markets_for_volatility
 from src.volatility import VolatilityDetector
-from src.execution import execute_arbitrage
-from src.telegram_notify import notify_arb_opportunity, notify_startup, notify_heartbeat
+from src.execution import execute_arbitrage, execute_split_arbitrage, execute_maker_arbitrage, check_maker_orders_status
+from src.telegram_notify import (
+    notify_arb_opportunity,
+    notify_split_arb_opportunity,
+    notify_maker_arb_opportunity,
+    notify_startup,
+    notify_heartbeat,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -86,25 +99,102 @@ def run_once(
     def get_bid(asset_id: str) -> Optional[float]:
         return store.get_best_bid(asset_id)
 
-    # 套利检测：YES/NO 买价之和 < 1 - fee - min_profit
-    arb_signals = scan_markets_for_arbitrage(
-        markets,
-        get_best_ask=get_ask,
-        min_profit=config.get("min_profit", 0.005),
-        fee_bps=config.get("fee_bps", 0),
-        default_size=config.get("default_size", 5.0),
-    )
-    for sig in arb_signals:
-        # 1. Deploy Log 醒目显示套利机会
-        logger.info(
-            "【套利机会】%s | YES=%.3f NO=%.3f 合计=%.3f | 预期利润=%.2f",
-            (sig.question or "套利")[:60], sig.price_yes, sig.price_no, sig.price_yes + sig.price_no, sig.expected_profit,
+    # Merge 套利检测：YES/NO 买价之和 < 1 - fee - min_profit（买入 YES+NO，等待结算或合并）
+    merge_arb_enabled = config.get("merge_arb_enabled", True)
+    if merge_arb_enabled:
+        arb_signals = scan_markets_for_arbitrage(
+            markets,
+            get_best_ask=get_ask,
+            min_profit=config.get("min_profit", 0.005),
+            fee_bps=config.get("fee_bps", 0),
+            default_size=config.get("default_size", 5.0),
         )
-        # 2. 执行层（paper 时只打 [PAPER] 明细）
-        execute_arbitrage(sig, client=client, paper=paper)
-        # 3. 套利机会推送到 Telegram
-        if notify_arb_opportunity(sig):
-            logger.info("套利机会已推送 Telegram")
+        for sig in arb_signals:
+            # 1. Deploy Log 醒目显示套利机会
+            logger.info(
+                "【Merge 套利机会】%s | YES=%.3f NO=%.3f 合计=%.3f | 预期利润=%.2f",
+                (sig.question or "套利")[:60], sig.price_yes, sig.price_no, sig.price_yes + sig.price_no, sig.expected_profit,
+            )
+            # 2. 执行层（paper 时只打 [PAPER] 明细）
+            execute_arbitrage(sig, client=client, paper=paper)
+            # 3. 套利机会推送到 Telegram
+            if notify_arb_opportunity(sig):
+                logger.info("Merge 套利机会已推送 Telegram")
+
+    # Split 套利检测：YES/NO 卖价（bid）之和 > 1 + min_profit（拆分 USDC 成 YES+NO，然后卖出）
+    split_arb_enabled = config.get("split_arb_enabled", True)
+    if split_arb_enabled:
+        split_signals = scan_markets_for_split_arbitrage(
+            markets,
+            get_best_bid=get_bid,
+            min_profit=config.get("min_profit", 0.005),
+            fee_bps=config.get("fee_bps", 0),
+            default_size=config.get("default_size", 5.0),
+        )
+        for sig in split_signals:
+            # 1. Deploy Log 醒目显示 Split 套利机会
+            logger.info(
+                "【Split 套利机会】%s | YES bid=%.3f NO bid=%.3f 合计=%.3f | 预期利润=%.2f",
+                (sig.question or "套利")[:60], sig.bid_yes, sig.bid_no, sig.bid_yes + sig.bid_no, sig.expected_profit,
+            )
+            # 2. 执行层（paper 时只打 [PAPER] 明细）
+            execute_split_arbitrage(sig, client=client, paper=paper)
+            # 3. Split 套利机会推送到 Telegram
+            if notify_split_arb_opportunity(sig):
+                logger.info("Split 套利机会已推送 Telegram")
+
+    # Maker 套利检测：在 YES 和 NO 两边挂 Maker 买单，等待成交（与 Taker 策略分离）
+    maker_arb_enabled = config.get("maker_arb_enabled", False)
+    if maker_arb_enabled:
+        maker_signals = scan_markets_for_maker_arbitrage(
+            markets,
+            get_best_ask=get_ask,
+            get_best_bid=get_bid,
+            min_profit=config.get("min_profit", 0.005),
+            maker_bid_spread=config.get("maker_bid_spread", 0.01),
+            fee_bps=config.get("fee_bps", 0),
+            default_size=config.get("default_size", 5.0),
+        )
+        for sig in maker_signals:
+            # 1. Deploy Log 醒目显示 Maker 套利机会
+            logger.info(
+                "【Maker 套利机会】%s | YES maker_bid=%.4f (ask=%.4f) NO maker_bid=%.4f (ask=%.4f) 合计=%.4f | 预期利润=%.2f",
+                (sig.question or "套利")[:60],
+                sig.maker_bid_yes,
+                sig.best_ask_yes,
+                sig.maker_bid_no,
+                sig.best_ask_no,
+                sig.maker_bid_yes + sig.maker_bid_no,
+                sig.expected_profit,
+            )
+            # 2. 执行层（paper 时只打 [PAPER] 明细）
+            execute_maker_arbitrage(
+                sig,
+                client=client,
+                paper=paper,
+                order_timeout_sec=config.get("maker_order_timeout_sec", 300.0),
+            )
+            # Maker 套利机会推送到 Telegram
+            if notify_maker_arb_opportunity(sig):
+                logger.info("Maker 套利机会已推送 Telegram")
+            logger.info("Maker 套利订单已提交（等待成交，可能获得 Maker 返佣）")
+
+        # 检查 Maker 订单状态（处理部分成交和超时）
+        if not paper and client is not None:
+            maker_stats = check_maker_orders_status(
+                client,
+                timeout_sec=config.get("maker_order_timeout_sec", 300.0),
+                paper=paper,
+            )
+            if maker_stats["total"] > 0:
+                logger.debug(
+                    "Maker 订单状态: 总计=%d 已成交=%d 部分成交=%d 待成交=%d 超时=%d",
+                    maker_stats["total"],
+                    maker_stats["filled"],
+                    maker_stats["partial"],
+                    maker_stats["pending"],
+                    maker_stats["timeout"],
+                )
 
     # 波动策略（可选）
     if config.get("volatility_enabled"):
@@ -152,6 +242,7 @@ def main(
         monitor_ids = [monitor_ids]
     monitor_set = {str(cid).strip() for cid in monitor_ids if cid}
     max_markets = int(config.get("max_markets_monitor", 10))
+    live_sports_enabled = config.get("live_sports_enabled", False)
 
     if monitor_set:
         # 指定 condition_id：拉体育事件后过滤
@@ -167,6 +258,22 @@ def main(
             markets = []
         markets = [m for m in markets if m.get("condition_id") in monitor_set]
         logger.info("监控指定 %d 个市场（monitor_condition_ids）", len(markets))
+    elif live_sports_enabled:
+        # 监控 live 体育市场（实时交易量大）
+        tag_id = config.get("sports_tag_id")
+        try:
+            markets = fetch_live_sports_binary_markets(
+                tag_id=tag_id,
+                limit=config.get("events_limit", 200),
+                offset=config.get("events_offset", 0),
+            )
+            # 限制监控数量
+            if len(markets) > max_markets:
+                markets = markets[:max_markets]
+        except Exception as e:
+            logger.exception("拉取 Live 体育市场失败: %s", e)
+            markets = []
+        logger.info("监控 Live 体育市场数量: %d（max_markets_monitor=%d）", len(markets), max_markets)
     else:
         # 未指定：按成交量 + 概率过滤取 top N，一直是最活跃市场
         try:
@@ -196,8 +303,13 @@ def main(
     def get_asset_ids() -> List[str]:
         return list(current_asset_ids)
 
-    # Deploy Logs：输出任务状态与监控的市场列表（Top 100 时打【Top 100 监控市场】）
-    top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
+    # Deploy Logs：输出任务状态与监控的市场列表
+    if monitor_set:
+        top_label = None
+    elif live_sports_enabled:
+        top_label = "Live 体育市场"
+    else:
+        top_label = "Top 100 监控市场" if current_markets else None
     log_task_status_and_workbook(
         store, current_markets,
         status="主循环启动前，监控市场列表",
@@ -221,7 +333,12 @@ def main(
         ws_thread.start()
         logger.info("已启动 orderbook WebSocket，订阅 %d 个 asset_ids", len(current_asset_ids))
         time.sleep(3)
-        top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
+        if monitor_set:
+            top_label = None
+        elif live_sports_enabled:
+            top_label = "Live 体育市场"
+        else:
+            top_label = "Top 100 监控市场" if current_markets else None
         log_task_status_and_workbook(
             store, current_markets, status="首批订单簿已就绪，Workbook 快照", top_n_label=top_label,
         )
@@ -243,31 +360,57 @@ def main(
                     logger.info("已推送 Telegram 心跳：策略正在 Railway 运行中")
                 last_heartbeat = now
             if now - last_status_log >= status_log_interval:
-                top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
+                if monitor_set:
+                    top_label = None
+                elif live_sports_enabled:
+                    top_label = "Live 体育市场"
+                else:
+                    top_label = "Top 100 监控市场" if current_markets else None
                 log_task_status_and_workbook(
                     store, current_markets, status="主循环运行中", top_n_label=top_label,
                 )
                 last_status_log = now
-            # 未指定 monitor_condition_ids 时，定期刷新 top 市场并更新 current_markets / current_asset_ids
+            # 未指定 monitor_condition_ids 时，定期刷新市场并更新 current_markets / current_asset_ids
             if not monitor_set and now - last_refresh >= refresh_interval:
                 try:
-                    new_markets = fetch_top10_binary_markets_by_volume(
-                        events_limit=config.get("events_limit", 150),
-                        min_prob=config.get("top10_min_prob", 0.01),
-                        max_prob=config.get("top10_max_prob", 0.99),
-                        top_n=max_markets,
-                    )
-                    if new_markets:
-                        current_markets.clear()
-                        current_markets.extend(new_markets)
-                        new_ids: List[str] = []
-                        for m in current_markets:
-                            new_ids.append(m["token_id_yes"])
-                            new_ids.append(m["token_id_no"])
-                        current_asset_ids[:] = list(dict.fromkeys(new_ids))
-                        logger.info("已刷新监控市场为 %d 个（按成交量 top），下次 WS 重连将订阅新 asset_ids", len(current_markets))
+                    if live_sports_enabled:
+                        # 刷新 live 体育市场
+                        tag_id = config.get("sports_tag_id")
+                        new_markets = fetch_live_sports_binary_markets(
+                            tag_id=tag_id,
+                            limit=config.get("events_limit", 200),
+                            offset=config.get("events_offset", 0),
+                        )
+                        if len(new_markets) > max_markets:
+                            new_markets = new_markets[:max_markets]
+                        if new_markets:
+                            current_markets.clear()
+                            current_markets.extend(new_markets)
+                            new_ids: List[str] = []
+                            for m in current_markets:
+                                new_ids.append(m["token_id_yes"])
+                                new_ids.append(m["token_id_no"])
+                            current_asset_ids[:] = list(dict.fromkeys(new_ids))
+                            logger.info("已刷新 Live 体育市场为 %d 个，下次 WS 重连将订阅新 asset_ids", len(current_markets))
+                    else:
+                        # 刷新 top 市场
+                        new_markets = fetch_top10_binary_markets_by_volume(
+                            events_limit=config.get("events_limit", 150),
+                            min_prob=config.get("top10_min_prob", 0.01),
+                            max_prob=config.get("top10_max_prob", 0.99),
+                            top_n=max_markets,
+                        )
+                        if new_markets:
+                            current_markets.clear()
+                            current_markets.extend(new_markets)
+                            new_ids: List[str] = []
+                            for m in current_markets:
+                                new_ids.append(m["token_id_yes"])
+                                new_ids.append(m["token_id_no"])
+                            current_asset_ids[:] = list(dict.fromkeys(new_ids))
+                            logger.info("已刷新监控市场为 %d 个（按成交量 top），下次 WS 重连将订阅新 asset_ids", len(current_markets))
                 except Exception as e:
-                    logger.exception("刷新 top 市场失败: %s", e)
+                    logger.exception("刷新市场失败: %s", e)
                 last_refresh = now
             time.sleep(poll_interval_sec)
     except KeyboardInterrupt:

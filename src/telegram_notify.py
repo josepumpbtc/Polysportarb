@@ -7,7 +7,7 @@ from typing import Optional
 
 import requests
 
-from src.arbitrage import ArbitrageSignal
+from src.arbitrage import ArbitrageSignal, SplitArbitrageSignal, MakerArbitrageSignal
 
 logger = logging.getLogger(__name__)
 
@@ -76,12 +76,98 @@ def format_arb_opportunity(signal: ArbitrageSignal) -> str:
     return "\n".join(lines)
 
 
+def format_split_arb_opportunity(signal: SplitArbitrageSignal) -> str:
+    """
+    目的：将 Split 套利信号格式化为 Telegram 详细消息
+    """
+    q = (signal.question or "Split 套利机会").strip()
+    if len(q) > 120:
+        q = q[:117] + "..."
+    url = _market_url(signal.condition_id)
+    sum_bid = signal.bid_yes + signal.bid_no
+    lines = [
+        "🚀 Split 套利机会（瞬间结算）",
+        "",
+        "【市场】",
+        q,
+        "",
+        "【卖出价格】",
+        f"卖 YES: {signal.bid_yes:.3f}",
+        f"卖 NO:  {signal.bid_no:.3f}",
+        f"合计:   {sum_bid:.3f} (> 1 存在套利)",
+        "",
+        "【操作】",
+        f"1. 用 ${signal.size:.2f} USDC 拆分成 {signal.size:.2f} YES + {signal.size:.2f} NO",
+        f"2. 分别卖出给市场上的 bid",
+        "",
+        "【预期利润】",
+        f"${signal.expected_profit:.2f}（瞬间结算，无需等待）",
+        "",
+    ]
+    if url:
+        lines.append("【市场链接】")
+        lines.append(url)
+    return "\n".join(lines)
+
+
+def format_maker_arb_opportunity(signal: MakerArbitrageSignal) -> str:
+    """
+    目的：将 Maker 套利信号格式化为 Telegram 详细消息
+    """
+    q = (signal.question or "Maker 套利机会").strip()
+    if len(q) > 120:
+        q = q[:117] + "..."
+    url = _market_url(signal.condition_id)
+    sum_maker_bid = signal.maker_bid_yes + signal.maker_bid_no
+    lines = [
+        "📊 Maker 套利机会（做市商价差）",
+        "",
+        "【市场】",
+        q,
+        "",
+        "【Maker 买单价格】",
+        f"YES Maker Bid: {signal.maker_bid_yes:.4f} (当前 Ask: {signal.best_ask_yes:.4f})",
+        f"NO  Maker Bid: {signal.maker_bid_no:.4f} (当前 Ask: {signal.best_ask_no:.4f})",
+        f"合计:         {sum_maker_bid:.4f} (< 1 存在套利)",
+        "",
+        "【操作】",
+        f"在 YES 和 NO 两边挂 Maker 买单，等待成交",
+        f"每腿数量: {signal.size:.1f}",
+        "",
+        "【预期利润】",
+        f"${signal.expected_profit:.2f}（可能获得 Maker 返佣）",
+        "",
+        "⚠️ 注意：可能只成交一边，需要监控订单状态",
+        "",
+    ]
+    if url:
+        lines.append("【市场链接】")
+        lines.append(url)
+    return "\n".join(lines)
+
+
 def notify_arb_opportunity(signal: ArbitrageSignal) -> bool:
     """
-    目的：出现套利机会时推送到 Telegram；供 run_once 或 execution 层调用
+    目的：出现 Taker/Merge 套利机会时推送到 Telegram；供 run_once 或 execution 层调用
     方法：格式化 signal 后调用 send_telegram_message；未配置 TELEGRAM_* 则跳过
     """
     text = format_arb_opportunity(signal)
+    return send_telegram_message(text)
+
+
+def notify_split_arb_opportunity(signal: SplitArbitrageSignal) -> bool:
+    """
+    目的：出现 Split 套利机会时推送到 Telegram
+    """
+    text = format_split_arb_opportunity(signal)
+    return send_telegram_message(text)
+
+
+def notify_maker_arb_opportunity(signal: MakerArbitrageSignal) -> bool:
+    """
+    目的：出现 Maker 套利机会时推送到 Telegram
+    """
+    text = format_maker_arb_opportunity(signal)
     return send_telegram_message(text)
 
 

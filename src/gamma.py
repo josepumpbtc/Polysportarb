@@ -209,6 +209,30 @@ def fetch_sports_binary_markets(
     return events_to_binary_markets(events)
 
 
+def fetch_live_sports_binary_markets(
+    tag_id: Optional[int] = None,
+    limit: int = 200,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    """
+    目的：拉取正在进行的（live）体育市场，用于监控实时交易量大的体育比赛
+    方法：获取体育 events，过滤 live=true，转换为二元市场列表
+    注意：如果未指定 tag_id，会获取所有 events 并过滤 live=true，建议使用 sports_tag_id
+    """
+    # 获取 events（如果指定了 tag_id 则只获取该 tag 的 events）
+    events = fetch_events(tag_id=tag_id, closed=False, limit=limit, offset=offset)
+    
+    # 过滤 live=true 的事件
+    live_events = []
+    for ev in events:
+        # 检查 event 的 live 字段（必须是 True，不能只是 truthy）
+        if ev.get("live") is True:
+            live_events.append(ev)
+    
+    # 转换为二元市场列表
+    return events_to_binary_markets(live_events)
+
+
 def fetch_top10_binary_markets_by_volume(
     events_limit: int = 200,
     min_prob: float = 0.01,

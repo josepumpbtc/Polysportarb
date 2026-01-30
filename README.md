@@ -1,3 +1,4 @@
+
 # Polysportarb
 
 Polymarket 体育赛事实时波动套利：YES/NO 价差套利 + 可选波动策略。代码推送至 [josepumpbtc/Polysportarb](https://github.com/josepumpbtc/Polysportarb)。
@@ -6,6 +7,153 @@ Polymarket 体育赛事实时波动套利：YES/NO 价差套利 + 可选波动�
 
 - **主策略**：当同一二元市场的 YES 买价 + NO 买价 < 1 - 手续费时，同时买入 YES 和 NO 锁定到期利润。
 - **辅策略**：利用体育赛事实时价格波动做单边方向性交易（有风险，需风控）。
+
+## 套利策略原理
+
+本项目实现了三种套利策略，利用 Polymarket 二元市场的价差和 CTF（Conditional Token Framework）特性实现无风险或低风险套利：
+
+### 1. Taker Arb（吃单套利）
+
+**原理**：
+- 二元市场中，YES 和 NO 的结算价值恒为 $1（到期时 YES 得 $1 或 NO 得 $1）
+- 当 `ask_yes + ask_no < 1` 时，存在套利机会
+- **操作**：立即以 `best_ask` 价格同时买入 YES 和 NO（吃单，Taker）
+- **利润**：`利润 = 1 - (ask_yes + ask_no)`
+- **结算**：等待事件结束，任一方结算得 $1；或立即调用 CTF Merge 操作合并成 USDC（瞬间结算）
+
+**示例**：
+- YES best ask = $0.40，NO best ask = $0.55
+- 成本 = $0.40 + $0.55 = $0.95
+- 利润 = $1.00 - $0.95 = $0.05（每单位）
+
+**优势**：
+- 立即成交，锁定利润
+- 风险低，无时间风险（如果立即合并）
+- 简单直接，不需要链上操作（如果等待结算）
+
+**劣势**：
+- 可能支付 Taker 费用（如果交易所收取）
+- 如果等待结算，资金占用时间较长
+
+---
+
+### 2. Maker Spread Arb（做市商价差套利）
+
+**原理**：
+- 与 Taker 策略相同的套利条件：`ask_yes + ask_no < 1`
+- **操作**：在 YES 和 NO 两边挂 Maker 买单（价格略低于 `best_ask`），等待成交
+- **价格设置**：`maker_bid = best_ask - maker_bid_spread`（例如 best_ask = 0.40，spread = 0.01，则挂 0.39）
+- **利润**：`利润 = 1 - (maker_bid_yes + maker_bid_no)` + 可能的 Maker 返佣
+
+**示例**：
+- YES best ask = $0.40，NO best ask = $0.55
+- Maker 买单：YES 挂 $0.39，NO 挂 $0.54
+- 如果两边都成交：成本 = $0.39 + $0.54 = $0.93
+- 利润 = $1.00 - $0.93 = $0.07（每单位）+ Maker 返佣
+
+**优势**：
+- 可能获得 Maker 返佣/奖励（如果 Polymarket 有流动性激励）
+- 可以等待更好的成交价格
+- 提供流动性，有助于市场深度
+
+**劣势**：
+- **部分成交风险**：可能只成交一边（例如只成交 YES，NO 未成交）
+- **资金占用**：需要等待成交，资金被占用
+- **机会成本**：可能错过立即成交的机会
+- **超时风险**：如果订单超时未成交，需要撤单或转为 Taker 策略
+
+**风险控制**：
+- 设置订单超时时间（默认 5 分钟）
+- 监控订单状态，处理部分成交情况
+- 超时后考虑撤单并转为 Taker 策略
+
+---
+
+### 3. Merge/Split Arb（合并/拆分套利）- Polymarket 特有
+
+这是 Polymarket 基于 CTF（Conditional Token Framework）的独特功能，允许瞬间结算套利。
+
+#### 3.1 Split 套利（拆分套利）
+
+**原理**：
+- 当 `bid_yes + bid_no > 1 + min_profit` 时，存在 Split 套利机会
+- **操作**：
+  1. 用 $1 USDC 调用 CTF Split 操作，拆分成 1 YES + 1 NO
+  2. 分别将 YES 和 NO 卖给市场上的 bid
+  3. 获得超过 $1 的收入
+- **利润**：`利润 = (bid_yes + bid_no) - 1`
+- **结算**：**瞬间结算**，不需要等到事件结束
+
+**示例**：
+- YES best bid = $0.52，NO best bid = $0.49
+- 用 $1.00 USDC 拆分成 1 YES + 1 NO
+- 卖出收入 = $0.52 + $0.49 = $1.01
+- 利润 = $1.01 - $1.00 = $0.01（每单位）
+
+**优势**：
+- **瞬间结算**：不需要等到事件结束，立即获得利润
+- **资金效率高**：资金可以快速周转，进行下一轮套利
+- **无时间风险**：不承担事件结果的不确定性
+
+**劣势**：
+- 需要链上 Split 操作，需要支付 Gas 费用
+- 需要确保 bid 有足够的深度，避免部分成交
+
+#### 3.2 Merge 套利（合并套利）
+
+**原理**：
+- 与 Taker 策略相同的套利条件：`ask_yes + ask_no < 1`
+- **操作**：
+  1. 买入 YES + NO（与 Taker 策略相同）
+  2. 立即调用 CTF Merge 操作，将 YES+NO 合并成 USDC
+  3. 获得 $1 USDC，成本低于 $1
+- **利润**：`利润 = 1 - (ask_yes + ask_no)`
+- **结算**：**瞬间结算**，不需要等到事件结束
+
+**示例**：
+- YES best ask = $0.40，NO best ask = $0.55
+- 买入成本 = $0.40 + $0.55 = $0.95
+- 立即合并成 $1.00 USDC
+- 利润 = $1.00 - $0.95 = $0.05（每单位）
+
+**优势**：
+- **瞬间结算**：不需要等到事件结束
+- 与 Taker 策略相比，可以立即获得利润，资金周转快
+
+**劣势**：
+- 需要链上 Merge 操作，需要支付 Gas 费用
+- 如果等待结算，不需要 Gas 费用（但资金占用时间长）
+
+---
+
+### 策略对比总结
+
+| 策略 | 条件 | 操作方式 | 结算时间 | 主要优势 | 主要风险 |
+|------|------|----------|----------|----------|----------|
+| **Taker Arb** | `ask_yes + ask_no < 1` | 立即买入（吃单） | 等待结算或立即合并 | 立即成交，锁定利润 | 可能支付 Taker 费用 |
+| **Maker Spread Arb** | `ask_yes + ask_no < 1` | 挂 Maker 买单等待 | 等待成交后结算 | 可能获得返佣 | 部分成交风险 |
+| **Split Arb** | `bid_yes + bid_no > 1` | 拆分 USDC → 卖出 | **瞬间结算** | 无需等待，资金周转快 | 需要 Gas 费用 |
+| **Merge Arb** | `ask_yes + ask_no < 1` | 买入 → 立即合并 | **瞬间结算** | 瞬间结算，资金周转快 | 需要 Gas 费用 |
+
+### 配置说明
+
+在 `config/config.yaml` 中可以配置各策略的启用状态：
+
+```yaml
+# Taker 策略（Merge 套利）
+merge_arb_enabled: true      # 启用 Taker 套利
+instant_merge: false         # 是否立即合并（false=等待结算，true=瞬间结算）
+
+# Split 套利
+split_arb_enabled: true      # 启用 Split 套利
+
+# Maker 策略
+maker_arb_enabled: false      # 启用 Maker 套利（默认关闭）
+maker_bid_spread: 0.01        # Maker 买单价格低于 best ask 的价差
+maker_order_timeout_sec: 300  # Maker 订单超时时间（秒）
+```
+
+详细实现逻辑请参考 [docs/ARBITRAGE_LOGIC.md](docs/ARBITRAGE_LOGIC.md)。
 
 ## 环境
 
