@@ -44,8 +44,14 @@ def _parse_market_tokens(market: Dict[str, Any]) -> Optional[Dict[str, str]]:
     目的：从单个 market 中解析出 YES/NO 对应的 CLOB token_id，供订单簿订阅与套利用
     方法：优先 clobTokenIds 数组（顺序通常为 [yes_token_id, no_token_id]），否则从 tokens 或 outcomes 中取
     """
-    # 方法：Gamma 常见字段为 clobTokenIds，二元市场为两元素
-    clob_ids = market.get("clobTokenIds")
+    # 方法：Gamma 常见字段为 clobTokenIds，可能为 JSON 字符串或数组，二元市场为两元素
+    clob_ids = market.get("clobTokenIds") or market.get("clob_token_ids")
+    if isinstance(clob_ids, str):
+        try:
+            import json
+            clob_ids = json.loads(clob_ids)
+        except (ValueError, TypeError):
+            clob_ids = None
     if isinstance(clob_ids, list) and len(clob_ids) >= 2:
         return {"yes": str(clob_ids[0]), "no": str(clob_ids[1])}
 

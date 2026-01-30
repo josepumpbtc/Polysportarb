@@ -19,6 +19,25 @@ Polymarket 体育赛事实时波动套利：YES/NO 价差套利 + 可选波动�
 
 **切勿将 `.env` 或真实密钥提交到 Git。**
 
+## 项目开始 To-Do（连接与测试）
+
+按顺序执行以下脚本（无需密钥即可完成 1、3 纸面、4；2 与 3 实盘需配置 `.env`）：
+
+1. **连接 Polymarket API**（Gamma + CLOB 可用性）  
+   `python scripts/connect_api.py`
+
+2. **连接 Polymarket 地址**（认证 + funder 校验）  
+   `python scripts/connect_address.py`  
+   需在项目根目录配置 `.env`（`PRIVATE_KEY`、`FUNDER_ADDRESS`）。
+
+3. **测试下单**  
+   - 纸面（不下单）：`python scripts/test_order.py --paper`  
+   - 实盘（最小额）：`python scripts/test_order.py --live`（需 `.env`）
+
+4. **测试 orderbook 实时监视**  
+   `python scripts/test_orderbook_ws.py --seconds 30`  
+   若出现 SSL 证书错误，可设置 `SSL_CERT_FILE` 或在本机安装/更新 CA 证书（如 macOS：安装 Xcode 命令行工具或运行证书安装脚本）。
+
 ## 运行
 
 - **纸面/模拟（推荐先跑）**：`PAPER_TRADING=true python -m src.main` 或 `python scripts/paper_trade.py`，只打 log 不下单。
@@ -48,6 +67,19 @@ git push -u origin main
 ```
 
 请勿提交 `.env` 或真实密钥。
+
+## Railway 部署
+
+1. 在 [Railway](https://railway.app) 新建项目，选择 **Deploy from GitHub repo**，连接 `josepumpbtc/Polysportarb`。
+2. 在 Service 的 **Variables** 中配置环境变量（勿提交到 Git）：
+   - `PRIVATE_KEY`：钱包私钥
+   - `FUNDER_ADDRESS`：Polymarket 代理钱包地址
+   - `PAPER_TRADING`：`true` 为纸面（只打 log），`false` 为实盘
+   - 可选：`API_KEY`、`API_SECRET`、`API_PASSPHRASE`（不填则 L1 自动派生）
+3. 构建与启动：Railway 使用 `requirements.txt` 构建；启动命令已在 `railway.json` 中设为 `python -m src.main`（可在 Dashboard 的 **Settings → Deploy** 中覆盖）。
+4. 部署后服务会持续运行主循环；日志在 Railway 控制台查看。
+
+**注意**：实盘需小额资金并确认当地合规；建议先用 `PAPER_TRADING=true` 验证。
 
 ## 免责声明
 
