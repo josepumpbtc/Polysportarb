@@ -36,15 +36,44 @@ def send_telegram_message(text: str, bot_token: Optional[str] = None, chat_id: O
         return False
 
 
+# Polymarket 市场页面 URL（用 condition_id 可跳转或搜索）
+def _market_url(condition_id: str) -> str:
+    if not condition_id or not condition_id.strip():
+        return ""
+    cid = condition_id.strip()
+    return f"https://polymarket.com/market/{cid}"
+
+
 def format_arb_opportunity(signal: ArbitrageSignal) -> str:
-    """目的：将套利信号格式化为 Telegram 可读的一行摘要。方法：含 question、价格、预期利润"""
-    q = (signal.question or "套利机会")[:80]
-    return (
-        "🔔 套利机会\n"
-        "市场: %s\n"
-        "YES价=%.3f NO价=%.3f 合计=%.3f\n"
-        "size=%.1f 预期利润=%.2f"
-    ) % (q, signal.price_yes, signal.price_no, signal.price_yes + signal.price_no, signal.size, signal.expected_profit)
+    """
+    目的：将套利信号格式化为 Telegram 详细消息
+    内容：套利市场名称、市场 URL、买卖价格（YES/NO 买价）、建议下单量与预期利润
+    """
+    q = (signal.question or "套利机会").strip()
+    if len(q) > 120:
+        q = q[:117] + "..."
+    url = _market_url(signal.condition_id)
+    sum_price = signal.price_yes + signal.price_no
+    lines = [
+        "🔔 套利机会",
+        "",
+        "【市场】",
+        q,
+        "",
+        "【买卖价格】",
+        f"买 YES: {signal.price_yes:.3f}",
+        f"买 NO:  {signal.price_no:.3f}",
+        f"合计:   {sum_price:.3f} (< 1 存在套利)",
+        "",
+        "【建议下单】",
+        f"每腿数量: {signal.size:.1f}",
+        f"预期利润: ${signal.expected_profit:.2f}",
+        "",
+    ]
+    if url:
+        lines.append("【市场链接】")
+        lines.append(url)
+    return "\n".join(lines)
 
 
 def notify_arb_opportunity(signal: ArbitrageSignal) -> bool:
@@ -75,3 +104,12 @@ def notify_startup() -> bool:
     if not ok:
         logger.warning("Telegram 启动测试消息发送失败，请检查 BOT_TOKEN 与 CHAT_ID 是否正确")
     return ok
+
+
+def notify_heartbeat() -> bool:
+    """
+    目的：每小时推送一条「策略正在 Railway 运行中」，确认服务存活
+    方法：发送固定文案；未配置 TELEGRAM_* 时返回 False，不抛异常
+    """
+    text = "⏱ Polysportarb 策略正在 Railway 运行中"
+    return send_telegram_message(text)

@@ -2,8 +2,8 @@
 # 方法：main 启动时加载，敏感信息仍用环境变量
 
 # 套利参数
-min_profit: 0.005        # 最小利润阈值（美元），低于此不触发
-fee_bps: 0               # 手续费（basis points），按 Polymarket 实际填写
+min_profit: 0.5          # 最小利润阈值（美元），低于此不触发；0.5 表示仅当 YES+NO 买价合计<=0.5 才触发；测试 Telegram 可临时改为 0.05
+fee_bps: 0               # 手续费（basis points）；Polymarket 目前无手续费，保持 0
 
 # 体育市场筛选
 sports_tag_id: null      # Gamma API tag_id，如 100381；null 表示用 /sports 或默认
@@ -16,6 +16,8 @@ top10_min_prob: 0.01
 top10_max_prob: 0.99
 # 每 N 秒在 Deploy Logs 输出【任务状态】与【Workbook】
 status_log_interval_sec: 60
+# 每小时推送 Telegram 心跳「策略正在 Railway 运行中」（秒）
+heartbeat_interval_sec: 3600
 # 未指定 monitor_condition_ids 时，每 N 秒刷新一次 top 市场（WS 下次重连会订阅新 asset_ids）
 refresh_markets_interval_sec: 1800
 # 指定监控的 condition_id；若为空则按「Top 100 Polymarket 24h 交易量」动态拉取（推荐）

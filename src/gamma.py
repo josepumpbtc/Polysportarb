@@ -10,6 +10,83 @@ import requests
 GAMMA_BASE = "https://gamma-api.polymarket.com"
 
 
+def fetch_markets(
+    closed: bool = False,
+    limit: int = 200,
+    offset: int = 0,
+    order: str = "volume24hrClob",
+    ascending: bool = False,
+    timeout: int = 15,
+) -> List[Dict[str, Any]]:
+    """
+    目的：拉取 Gamma /markets 列表，支持按 volume24hrClob 排序（仅 24h 交易量）
+    方法：GET /markets，用于 Top 100 按 24h 交易量筛选
+    """
+    params: Dict[str, Any] = {
+        "closed": str(closed).lower(),
+        "limit": limit,
+        "offset": offset,
+        "order": order,
+        "ascending": str(ascending).lower(),
+    }
+    resp = requests.get(
+        f"{GAMMA_BASE}/markets",
+        params=params,
+        timeout=timeout,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return data if isinstance(data, list) else []
+
+
+def fetch_event_by_slug(slug: str, timeout: int = 15) -> Optional[Dict[str, Any]]:
+    """
+    目的：按 event slug 拉取单个 event（如 polymarket.com/event/<slug>），供单市场套利测试
+    方法：GET /events/slug/{slug}，返回单个 event 或 None
+    """
+    if not slug or not str(slug).strip():
+        return None
+    slug = str(slug).strip()
+    resp = requests.get(
+        f"{GAMMA_BASE}/events/slug/{slug}",
+        timeout=timeout,
+    )
+    if resp.status_code != 200:
+        return None
+    data = resp.json()
+    return data if isinstance(data, dict) else None
+
+
+def event_to_binary_markets(event: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    目的：将单个 event（含 markets）转为可交易二元市场列表，与 events_to_binary_markets 单条逻辑一致
+    方法：遍历 event.markets，解析 YES/NO token_id，过滤已结束与非二元
+    """
+    out: List[Dict[str, Any]] = []
+    markets = event.get("markets") or event.get("market") or []
+    if not isinstance(markets, list):
+        markets = [markets] if isinstance(markets, dict) else []
+    for m in markets:
+        if not isinstance(m, dict):
+            continue
+        tokens = _parse_market_tokens(m)
+        if not tokens:
+            continue
+        if _is_market_ended(m, event):
+            continue
+        condition_id = m.get("conditionId") or m.get("condition_id") or ""
+        if not condition_id:
+            continue
+        out.append({
+            "condition_id": condition_id,
+            "token_id_yes": tokens["yes"],
+            "token_id_no": tokens["no"],
+            "event_slug": event.get("slug") or event.get("id") or "",
+            "question": m.get("question") or m.get("title") or "",
+        })
+    return out
+
+
 def fetch_events(
     tag_id: Optional[int] = None,
     closed: bool = False,
@@ -133,53 +210,60 @@ def fetch_sports_binary_markets(
 
 
 def fetch_top10_binary_markets_by_volume(
-    events_limit: int = 150,
+    events_limit: int = 200,
     min_prob: float = 0.01,
     max_prob: float = 0.99,
     top_n: int = 10,
 ) -> List[Dict[str, Any]]:
     """
-    目的：拉取二元市场后按交易量排序，过滤概率在 (min_prob, max_prob) 内，返回 top N
-    活跃市场定义：Top 100 Polymarket 24h 交易量，且 0.01 < YES 概率 < 0.99（排除 >99%% 或 <1%%）
-    方法：fetch_events 后遍历 markets，取 volume/volumeNum/volumeClob、outcomePrices，过滤已结束与极端概率，按 volume 降序取前 top_n
+    目的：拉取二元市场后按「仅 24 小时」交易量排序，过滤概率在 (min_prob, max_prob) 内，返回 top N
+    活跃市场定义：Top 100 Polymarket 24h 交易量（不看历史总交易量），且 0.01 < YES 概率 < 0.99
+    方法：GET /markets 按 volume24hrClob 降序，只取 volume24hr/volume24hrClob 作为排序依据，过滤已结束与极端概率
     """
     import json
-    events = fetch_events(closed=False, limit=events_limit)
+    # 仅用 24h 交易量：直接请求 /markets 按 volume24hrClob 降序
+    markets_raw = fetch_markets(
+        closed=False,
+        limit=events_limit,
+        offset=0,
+        order="volume24hrClob",
+        ascending=False,
+    )
     cands: List[tuple] = []
-    for ev in events:
-        for m in ev.get("markets") or []:
-            if not isinstance(m, dict):
-                continue
-            if _is_market_ended(m, ev):
-                continue
-            tokens = _parse_market_tokens(m)
-            if not tokens:
-                continue
-            cid = m.get("conditionId") or m.get("condition_id") or ""
-            if not cid:
-                continue
-            # 优先 24h 交易量（若有），否则用总交易量
-            vol_raw = m.get("volume24hr") or m.get("volumeNum24hr") or m.get("volume") or m.get("volumeNum") or m.get("volumeClob") or 0
+    for m in markets_raw:
+        if not isinstance(m, dict):
+            continue
+        if _is_market_ended(m, {}):
+            continue
+        tokens = _parse_market_tokens(m)
+        if not tokens:
+            continue
+        cid = m.get("conditionId") or m.get("condition_id") or ""
+        if not cid:
+            continue
+        # 只看 24h 交易量，不看历史 volume
+        vol_raw = m.get("volume24hrClob") or m.get("volume24hr") or 0
+        try:
+            vol = float(vol_raw)
+        except (TypeError, ValueError):
+            vol = 0
+        op = m.get("outcomePrices") or m.get("outcome_prices")
+        if isinstance(op, str):
             try:
-                vol = float(vol_raw)
-            except (TypeError, ValueError):
-                vol = 0
-            op = m.get("outcomePrices") or m.get("outcome_prices")
-            if isinstance(op, str):
-                try:
-                    op = json.loads(op)
-                except (ValueError, TypeError):
-                    op = []
-            if not isinstance(op, list) or len(op) < 2:
-                continue
-            try:
-                yes_p = float(op[0])
-            except (TypeError, ValueError):
-                yes_p = 0.5
-            if yes_p <= min_prob or yes_p >= max_prob:
-                continue
-            q = m.get("question") or m.get("title") or ""
-            cands.append((vol, cid, tokens["yes"], tokens["no"], q))
+                op = json.loads(op)
+            except (ValueError, TypeError):
+                op = []
+        if not isinstance(op, list) or len(op) < 2:
+            continue
+        try:
+            yes_p = float(op[0])
+        except (TypeError, ValueError):
+            yes_p = 0.5
+        if yes_p <= min_prob or yes_p >= max_prob:
+            continue
+        q = m.get("question") or m.get("title") or ""
+        cands.append((vol, cid, tokens["yes"], tokens["no"], q))
+    # 已按 API 的 volume24hrClob 顺序返回，再按 vol 降序取前 top_n（保证只用 24h）
     cands.sort(key=lambda x: -x[0])
     out: List[Dict[str, Any]] = []
     for _, cid, ty, tn, q in cands[:top_n]:

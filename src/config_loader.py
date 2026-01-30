@@ -21,6 +21,7 @@ DEFAULTS: Dict[str, Any] = {
     "top10_max_prob": 0.99,
     "status_log_interval_sec": 60.0,  # 每 N 秒在 Deploy Logs 输出任务状态与 Workbook
     "refresh_markets_interval_sec": 1800.0,  # 未指定 monitor_condition_ids 时，每 N 秒刷新一次 top 市场
+    "heartbeat_interval_sec": 3600.0,  # 每小时推送 Telegram 心跳「策略正在 Railway 运行中」
     # 为空则按「Top 100 Polymarket 24h 交易量」动态拉取；非空则只监控这些 condition_id
     "monitor_condition_ids": [],
 }
@@ -47,5 +48,19 @@ def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
                     config[k] = v
     except Exception:
         pass
+
+    # 环境变量覆盖：便于 Railway 等不写 config 文件时调整
+    min_profit_env = os.getenv("MIN_PROFIT")
+    if min_profit_env is not None and min_profit_env.strip() != "":
+        try:
+            config["min_profit"] = float(min_profit_env.strip())
+        except ValueError:
+            pass
+    heartbeat_env = os.getenv("HEARTBEAT_INTERVAL_SEC")
+    if heartbeat_env is not None and heartbeat_env.strip() != "":
+        try:
+            config["heartbeat_interval_sec"] = float(heartbeat_env.strip())
+        except ValueError:
+            pass
 
     return config

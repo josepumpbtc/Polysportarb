@@ -76,7 +76,7 @@ class OrderBookStore:
             return (self._books.get(str(asset_id)) or {}).get("bid")
 
     def get_best_ask(self, asset_id: str) -> Optional[float]:
-        """目的：供套利逻辑读取某 token 的最优卖价（即我方买入价）。方法：从快照中取 ask"""
+        """目的：供套利逻辑读取「买该 token 的最优卖价」；Polymarket 无手续费，套利条件为 ask_yes + ask_no < 1。方法：从快照取 ask"""
         with self._lock:
             return (self._books.get(str(asset_id)) or {}).get("ask")
 

@@ -1,5 +1,8 @@
-# 目的：识别 YES/NO 价差套利机会（买价之和小于 1 减手续费与最小利润阈值）
-# 方法：对同一 market 的 YES/NO token，取当前 best ask；若 ask_yes + ask_no < 1 - fee - min_profit 则生成套利信号
+# 目的：识别 YES/NO 价差套利机会（主策略）
+# 逻辑：二元市场 YES+NO 结算恒为 $1。Polymarket 目前无手续费，套利条件为：
+#       「买 YES 的最优卖价 + 买 NO 的最优卖价」< 1
+# orderbook 上：买 YES 的最优卖价 = YES 合约的 best ask，买 NO 的最优卖价 = NO 合约的 best ask
+# 方法：对同一 market 的 YES/NO token 取 get_best_ask；若 ask_yes + ask_no < 1 - min_profit 则生成套利信号（fee=0 时）
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
@@ -32,8 +35,8 @@ def check_arbitrage(
     question: str = "",
 ) -> Optional[ArbitrageSignal]:
     """
-    目的：判断同一二元市场的 YES/NO 买价之和是否低于 1 - 手续费 - 最小利润，若成立则返回套利信号
-    方法：买价之和小于 1 减去手续费与 min_profit 即存在套利；利润 = 1 - (ask_yes + ask_no) - 手续费
+    目的：判断同一二元市场的 YES/NO 买价之和是否 < 1，若成立则返回套利信号
+    方法：Polymarket 无手续费，套利条件为 ask_yes + ask_no < 1（再扣 min_profit 阈值）；利润 = 1 - (ask_yes + ask_no)
     """
     ask_yes = get_best_ask(token_id_yes)
     ask_no = get_best_ask(token_id_no)

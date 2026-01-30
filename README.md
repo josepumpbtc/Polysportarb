@@ -47,6 +47,12 @@ Polymarket 体育赛事实时波动套利：YES/NO 价差套利 + 可选波动�
    `python scripts/test_orderbook_ws.py --seconds 30`  
    若出现 SSL 证书错误，可设置 `SSL_CERT_FILE` 或在本机安装/更新 CA 证书（如 macOS：安装 Xcode 命令行工具或运行证书安装脚本）。
 
+5. **单市场套利监视（按 event slug）**  
+   对指定市场监视「买 YES 最优卖价 + 买 NO 最优卖价 < 1」是否成立（Polymarket 无手续费）。  
+   示例（[US government shutdown by Jan 31](https://polymarket.com/event/will-there-be-another-us-government-shutdown-by-january-31)）：  
+   `python scripts/test_arb_one_market.py --slug will-there-be-another-us-government-shutdown-by-january-31 --seconds 60`  
+   若出现 SSL 错误，同上设置 `SSL_CERT_FILE`。
+
 ## 运行
 
 - **纸面/模拟（推荐先跑）**：`PAPER_TRADING=true python -m src.main` 或 `python scripts/paper_trade.py`，只打 log 不下单。

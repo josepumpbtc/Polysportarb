@@ -19,7 +19,7 @@ from src.arbitrage import scan_markets_for_arbitrage, ArbitrageSignal
 from src.volatility import scan_markets_for_volatility
 from src.volatility import VolatilityDetector
 from src.execution import execute_arbitrage
-from src.telegram_notify import notify_arb_opportunity, notify_startup
+from src.telegram_notify import notify_arb_opportunity, notify_startup, notify_heartbeat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -230,12 +230,18 @@ def main(
     logger.info("主循环启动，paper=%s，poll_interval=%.1fs", paper, poll_interval_sec)
     last_status_log = time.monotonic()
     last_refresh = time.monotonic()
+    last_heartbeat = time.monotonic()
     status_log_interval = float(config.get("status_log_interval_sec", 60.0))
     refresh_interval = float(config.get("refresh_markets_interval_sec", 1800.0))
+    heartbeat_interval = float(config.get("heartbeat_interval_sec", 3600.0))  # 每小时推送一次策略运行中
     try:
         while True:
             run_once(config, store, current_markets, paper, client, volatility_detectors)
             now = time.monotonic()
+            if now - last_heartbeat >= heartbeat_interval:
+                if notify_heartbeat():
+                    logger.info("已推送 Telegram 心跳：策略正在 Railway 运行中")
+                last_heartbeat = now
             if now - last_status_log >= status_log_interval:
                 top_label = "Top 100 监控市场" if not monitor_set and current_markets else None
                 log_task_status_and_workbook(

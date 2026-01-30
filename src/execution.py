@@ -1,5 +1,5 @@
-# 目的：统一下单入口并支持无实盘风险的纸面模式（paper 时只写日志不调用 CLOB）
-# 方法：套利信号用批量下单（YES+NO 两腿同 size）；paper 模式下不调用 post_order
+# 目的：价差套利下单——同时买 YES 和 NO，用信号中的 best ask 作为限价，到期任一侧得 $1
+# 方法：两腿同 size，价格取检测时的 price_yes/price_no（即 orderbook best ask）；优先批量 post_orders 减滑点
 
 import logging
 from typing import Any, List, Optional
