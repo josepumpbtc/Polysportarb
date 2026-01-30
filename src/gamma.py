@@ -89,6 +89,7 @@ def event_to_binary_markets(event: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def fetch_events(
     tag_id: Optional[int] = None,
+    tag_slug: Optional[str] = None,
     closed: bool = False,
     limit: int = 50,
     offset: int = 0,
@@ -96,7 +97,7 @@ def fetch_events(
 ) -> List[Dict[str, Any]]:
     """
     目的：拉取 Gamma 的 events 列表，供后续解析出可交易的二元市场
-    方法：GET /events，用 tag_id 过滤体育等分类，closed=false 只取未结束
+    方法：GET /events，用 tag_id 或 tag_slug 过滤体育等分类，closed=false 只取未结束
     """
     params: Dict[str, Any] = {
         "closed": str(closed).lower(),
@@ -105,6 +106,8 @@ def fetch_events(
     }
     if tag_id is not None:
         params["tag_id"] = tag_id
+    if tag_slug is not None:
+        params["tag_slug"] = tag_slug
 
     resp = requests.get(
         f"{GAMMA_BASE}/events",
@@ -210,17 +213,21 @@ def fetch_sports_binary_markets(
 
 
 def fetch_live_sports_binary_markets(
+    tag_slug: str = "sports",
     tag_id: Optional[int] = None,
     limit: int = 200,
     offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """
     目的：拉取正在进行的（live）体育市场，用于监控实时交易量大的体育比赛
-    方法：获取体育 events，过滤 live=true，转换为二元市场列表
-    注意：如果未指定 tag_id，会获取所有 events 并过滤 live=true，建议使用 sports_tag_id
+    方法：使用 tag_slug="sports" 获取体育 events，过滤 live=true，转换为二元市场列表
+    注意：优先使用 tag_slug="sports" 来准确获取体育事件，如果没有提供则使用 tag_id
     """
-    # 获取 events（如果指定了 tag_id 则只获取该 tag 的 events）
-    events = fetch_events(tag_id=tag_id, closed=False, limit=limit, offset=offset)
+    # 优先使用 tag_slug 获取体育事件，否则使用 tag_id
+    if tag_slug:
+        events = fetch_events(tag_slug=tag_slug, closed=False, limit=limit, offset=offset)
+    else:
+        events = fetch_events(tag_id=tag_id, closed=False, limit=limit, offset=offset)
     
     # 过滤 live=true 的事件
     live_events = []

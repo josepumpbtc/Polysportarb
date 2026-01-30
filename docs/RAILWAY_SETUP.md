@@ -103,6 +103,31 @@ python -u -m src.main
 PYTHONUNBUFFERED=1  # 确保日志实时输出
 ```
 
+## 市场监控说明
+
+### 监控策略
+
+系统默认同时监控两个数据源，合并去重：
+
+1. **Live Sports 市场**：
+   - 来源：`polymarket.com/sports/live`
+   - 特点：正在进行的体育比赛，实时交易量大
+   - 获取方式：使用 `tag_slug="sports"` 获取体育事件，过滤 `live=true`
+
+2. **Top10 by Volume 市场**：
+   - 来源：Polymarket 24小时交易量 Top 100
+   - 特点：全平台最活跃的市场
+   - 获取方式：按 `volume24hrClob` 排序，取前 N 个
+
+3. **合并去重**：
+   - 基于 `condition_id` 去重
+   - 限制总数为 `max_markets_monitor`（默认 100）
+
+**优势**：
+- Live Sports 市场通常交易活跃，套利机会多
+- Top10 by Volume 确保覆盖全平台最活跃的市场
+- 合并后活跃市场数量显著增加
+
 ## 策略说明
 
 ### Taker Arb（吃单套利）
@@ -157,7 +182,11 @@ PYTHONUNBUFFERED=1  # 确保日志实时输出
 检查：
 - `min_profit` 是否设置过高（建议测试时设为 0.05）
 - `merge_arb_enabled`、`split_arb_enabled`、`maker_arb_enabled` 是否都设为 `true`
-- Railway Logs 中是否有市场监控日志
+- `live_sports_enabled` 是否设为 `true`（默认启用，会同时监控 Live Sports 和 Top10）
+- Railway Logs 中是否有市场监控日志，应该看到类似：
+  - "拉取到 Live 体育市场数量: X"
+  - "拉取到 Top 市场数量: Y"
+  - "合并后监控市场数量: Z（Live Sports: X, Top10: Y, 去重后: Z）"
 
 ### 3. 订单未执行
 

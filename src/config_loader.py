@@ -16,8 +16,8 @@ DEFAULTS: Dict[str, Any] = {
     "min_book_depth": 10.0,
     "volatility_enabled": False,
     "volatility_deviation_pct": 0.05,
-    "max_markets_monitor": 100,  # 监控 N 个市场（按成交量 top、live_sports_enabled 或 monitor_condition_ids）
-    "live_sports_enabled": False,  # Live 体育市场监控（测试用）：监控正在进行的体育比赛
+    "max_markets_monitor": 100,  # 监控 N 个市场（live_sports + top10_by_volume 合并去重，或 monitor_condition_ids）
+    "live_sports_enabled": True,  # Live 体育市场监控：同时监控 live sports 和 top10_by_volume，合并去重
     "merge_arb_enabled": True,  # 启用 Merge 套利（Taker：买入 YES+NO，等待结算或合并成 USDC）
     "split_arb_enabled": True,  # 启用 Split 套利（用 USDC 拆分成 YES+NO，然后卖出，瞬间结算）
     "instant_merge": False,  # Merge 套利是否立即合并成 USDC（false 表示等待事件结算）
@@ -29,7 +29,7 @@ DEFAULTS: Dict[str, Any] = {
     "status_log_interval_sec": 60.0,  # 每 N 秒在 Deploy Logs 输出任务状态与 Workbook
     "refresh_markets_interval_sec": 1800.0,  # 未指定 monitor_condition_ids 时，每 N 秒刷新一次市场
     "heartbeat_interval_sec": 3600.0,  # 每小时推送 Telegram 心跳「策略正在 Railway 运行中」
-    # 为空则按优先级：live_sports_enabled > Top 100 Polymarket 24h 交易量；非空则只监控这些 condition_id
+    # 为空则同时监控 live_sports 和 top10_by_volume（合并去重）；非空则只监控这些 condition_id
     "monitor_condition_ids": [],
 }
 

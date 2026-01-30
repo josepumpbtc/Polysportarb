@@ -19,8 +19,8 @@ events_limit: 50         # 每次拉取 events 数量
 events_offset: 0
 # 监控市场数量（按成交量 top、live_sports_enabled 或 monitor_condition_ids 时生效）
 max_markets_monitor: 100
-# Live 体育市场监控（测试用）：监控正在进行的体育比赛，实时交易量大
-live_sports_enabled: false  # 设为 true 时监控 live 体育市场，优先级高于 top10_by_volume
+# Live 体育市场监控：监控正在进行的体育比赛，实时交易量大
+live_sports_enabled: true  # 设为 true 时同时监控 live 体育市场和 top10_by_volume，合并去重
 # 按成交量 top 时的概率过滤
 top10_min_prob: 0.01
 top10_max_prob: 0.99
@@ -30,7 +30,7 @@ status_log_interval_sec: 60
 heartbeat_interval_sec: 3600
 # 未指定 monitor_condition_ids 时，每 N 秒刷新一次市场（WS 下次重连会订阅新 asset_ids）
 refresh_markets_interval_sec: 1800
-# 指定监控的 condition_id；若为空则按优先级：live_sports_enabled > Top 100 Polymarket 24h 交易量
+# 指定监控的 condition_id；若为空则同时监控 live_sports 和 top10_by_volume（合并去重）
 monitor_condition_ids: []
 
 # 订单与风控

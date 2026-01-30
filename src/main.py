@@ -258,35 +258,60 @@ def main(
             markets = []
         markets = [m for m in markets if m.get("condition_id") in monitor_set]
         logger.info("监控指定 %d 个市场（monitor_condition_ids）", len(markets))
-    elif live_sports_enabled:
-        # 监控 live 体育市场（实时交易量大）
-        tag_id = config.get("sports_tag_id")
-        try:
-            markets = fetch_live_sports_binary_markets(
-                tag_id=tag_id,
-                limit=config.get("events_limit", 200),
-                offset=config.get("events_offset", 0),
-            )
-            # 限制监控数量
-            if len(markets) > max_markets:
-                markets = markets[:max_markets]
-        except Exception as e:
-            logger.exception("拉取 Live 体育市场失败: %s", e)
-            markets = []
-        logger.info("监控 Live 体育市场数量: %d（max_markets_monitor=%d）", len(markets), max_markets)
     else:
-        # 未指定：按成交量 + 概率过滤取 top N，一直是最活跃市场
+        # 同时获取 live sports 和 top10_by_volume，合并去重
+        live_sports_markets: List[Dict[str, Any]] = []
+        top10_markets: List[Dict[str, Any]] = []
+        
+        # 获取 live sports 市场
+        if live_sports_enabled:
+            tag_slug = "sports"  # 使用 tag_slug="sports" 准确获取体育事件
+            tag_id = config.get("sports_tag_id")
+            try:
+                live_sports_markets = fetch_live_sports_binary_markets(
+                    tag_slug=tag_slug,
+                    tag_id=tag_id,
+                    limit=config.get("events_limit", 200),
+                    offset=config.get("events_offset", 0),
+                )
+                logger.info("拉取到 Live 体育市场数量: %d", len(live_sports_markets))
+            except Exception as e:
+                logger.exception("拉取 Live 体育市场失败: %s", e)
+                live_sports_markets = []
+        
+        # 获取 top10_by_volume 市场
         try:
-            markets = fetch_top10_binary_markets_by_volume(
+            top10_markets = fetch_top10_binary_markets_by_volume(
                 events_limit=config.get("events_limit", 150),
                 min_prob=config.get("top10_min_prob", 0.01),
                 max_prob=config.get("top10_max_prob", 0.99),
                 top_n=max_markets,
             )
+            logger.info("拉取到 Top 市场数量: %d", len(top10_markets))
         except Exception as e:
             logger.exception("拉取 Top 市场失败: %s", e)
-            markets = []
-        logger.info("监控市场数量: %d（按成交量 top，max_markets_monitor=%d）", len(markets), max_markets)
+            top10_markets = []
+        
+        # 合并去重（基于 condition_id）
+        all_markets_dict: Dict[str, Dict[str, Any]] = {}
+        for m in live_sports_markets + top10_markets:
+            cid = m.get("condition_id")
+            if cid and cid not in all_markets_dict:
+                all_markets_dict[cid] = m
+        
+        # 转换为列表并限制数量
+        markets = list(all_markets_dict.values())
+        if len(markets) > max_markets:
+            markets = markets[:max_markets]
+        
+        logger.info(
+            "合并后监控市场数量: %d（Live Sports: %d, Top10: %d, 去重后: %d, max_markets_monitor=%d）",
+            len(markets),
+            len(live_sports_markets),
+            len(top10_markets),
+            len(all_markets_dict),
+            max_markets,
+        )
 
     if not markets:
         logger.warning("当前无监控市场，将空跑主循环（可清空 monitor_condition_ids 用按成交量 top）")
@@ -307,7 +332,7 @@ def main(
     if monitor_set:
         top_label = None
     elif live_sports_enabled:
-        top_label = "Live 体育市场"
+        top_label = "Live Sports + Top10 监控市场"
     else:
         top_label = "Top 100 监控市场" if current_markets else None
     log_task_status_and_workbook(
@@ -336,7 +361,7 @@ def main(
         if monitor_set:
             top_label = None
         elif live_sports_enabled:
-            top_label = "Live 体育市场"
+            top_label = "Live Sports + Top10 监控市场"
         else:
             top_label = "Top 100 监控市场" if current_markets else None
         log_task_status_and_workbook(
@@ -363,7 +388,7 @@ def main(
                 if monitor_set:
                     top_label = None
                 elif live_sports_enabled:
-                    top_label = "Live 体育市场"
+                    top_label = "Live Sports + Top10 监控市场"
                 else:
                     top_label = "Top 100 监控市场" if current_markets else None
                 log_task_status_and_workbook(
@@ -373,42 +398,57 @@ def main(
             # 未指定 monitor_condition_ids 时，定期刷新市场并更新 current_markets / current_asset_ids
             if not monitor_set and now - last_refresh >= refresh_interval:
                 try:
+                    # 同时刷新 live sports 和 top10_by_volume，合并去重
+                    new_live_sports: List[Dict[str, Any]] = []
+                    new_top10: List[Dict[str, Any]] = []
+                    
                     if live_sports_enabled:
                         # 刷新 live 体育市场
+                        tag_slug = "sports"
                         tag_id = config.get("sports_tag_id")
-                        new_markets = fetch_live_sports_binary_markets(
+                        new_live_sports = fetch_live_sports_binary_markets(
+                            tag_slug=tag_slug,
                             tag_id=tag_id,
                             limit=config.get("events_limit", 200),
                             offset=config.get("events_offset", 0),
                         )
-                        if len(new_markets) > max_markets:
-                            new_markets = new_markets[:max_markets]
-                        if new_markets:
-                            current_markets.clear()
-                            current_markets.extend(new_markets)
-                            new_ids: List[str] = []
-                            for m in current_markets:
-                                new_ids.append(m["token_id_yes"])
-                                new_ids.append(m["token_id_no"])
-                            current_asset_ids[:] = list(dict.fromkeys(new_ids))
-                            logger.info("已刷新 Live 体育市场为 %d 个，下次 WS 重连将订阅新 asset_ids", len(current_markets))
-                    else:
-                        # 刷新 top 市场
-                        new_markets = fetch_top10_binary_markets_by_volume(
-                            events_limit=config.get("events_limit", 150),
-                            min_prob=config.get("top10_min_prob", 0.01),
-                            max_prob=config.get("top10_max_prob", 0.99),
-                            top_n=max_markets,
+                        logger.info("刷新拉取到 Live 体育市场数量: %d", len(new_live_sports))
+                    
+                    # 刷新 top10 市场
+                    new_top10 = fetch_top10_binary_markets_by_volume(
+                        events_limit=config.get("events_limit", 150),
+                        min_prob=config.get("top10_min_prob", 0.01),
+                        max_prob=config.get("top10_max_prob", 0.99),
+                        top_n=max_markets,
+                    )
+                    logger.info("刷新拉取到 Top 市场数量: %d", len(new_top10))
+                    
+                    # 合并去重
+                    all_new_markets_dict: Dict[str, Dict[str, Any]] = {}
+                    for m in new_live_sports + new_top10:
+                        cid = m.get("condition_id")
+                        if cid and cid not in all_new_markets_dict:
+                            all_new_markets_dict[cid] = m
+                    
+                    new_markets = list(all_new_markets_dict.values())
+                    if len(new_markets) > max_markets:
+                        new_markets = new_markets[:max_markets]
+                    
+                    if new_markets:
+                        current_markets.clear()
+                        current_markets.extend(new_markets)
+                        new_ids: List[str] = []
+                        for m in current_markets:
+                            new_ids.append(m["token_id_yes"])
+                            new_ids.append(m["token_id_no"])
+                        current_asset_ids[:] = list(dict.fromkeys(new_ids))
+                        logger.info(
+                            "已刷新监控市场为 %d 个（Live Sports: %d, Top10: %d, 去重后: %d），下次 WS 重连将订阅新 asset_ids",
+                            len(current_markets),
+                            len(new_live_sports),
+                            len(new_top10),
+                            len(all_new_markets_dict),
                         )
-                        if new_markets:
-                            current_markets.clear()
-                            current_markets.extend(new_markets)
-                            new_ids: List[str] = []
-                            for m in current_markets:
-                                new_ids.append(m["token_id_yes"])
-                                new_ids.append(m["token_id_no"])
-                            current_asset_ids[:] = list(dict.fromkeys(new_ids))
-                            logger.info("已刷新监控市场为 %d 个（按成交量 top），下次 WS 重连将订阅新 asset_ids", len(current_markets))
                 except Exception as e:
                     logger.exception("刷新市场失败: %s", e)
                 last_refresh = now
