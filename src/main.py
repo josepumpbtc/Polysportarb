@@ -114,10 +114,18 @@ def main(
     if not markets:
         logger.warning("当前无体育二元市场，将空跑主循环（可手动注入 markets 测试）")
 
-    # 3. 测试阶段仅监控 N 个市场（默认 10）；后续可改为 100
-    max_markets = int(config.get("max_markets_monitor", 10))
-    markets = markets[:max_markets]
-    logger.info("监控市场数量: %d（max_markets_monitor=%d）", len(markets), max_markets)
+    # 3. 若配置了 monitor_condition_ids 则只监控这 10 个二元市场；否则取前 max_markets_monitor 个
+    monitor_ids = config.get("monitor_condition_ids") or []
+    if isinstance(monitor_ids, str):
+        monitor_ids = [monitor_ids]
+    monitor_set = {str(cid).strip() for cid in monitor_ids if cid}
+    if monitor_set:
+        markets = [m for m in markets if m.get("condition_id") in monitor_set]
+        logger.info("监控指定 %d 个市场（monitor_condition_ids）", len(markets))
+    else:
+        max_markets = int(config.get("max_markets_monitor", 10))
+        markets = markets[:max_markets]
+        logger.info("监控市场数量: %d（max_markets_monitor=%d）", len(markets), max_markets)
 
     store = OrderBookStore()
     # 方法：仅从上述 N 个市场收集 YES/NO token_id，供 WebSocket 订阅

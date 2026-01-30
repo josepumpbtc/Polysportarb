@@ -19,6 +19,15 @@ Polymarket 体育赛事实时波动套利：YES/NO 价差套利 + 可选波动�
 
 **切勿将 `.env` 或真实密钥提交到 Git。**
 
+### Telegram 推送（套利机会提醒）
+
+需要把套利机会推送到 Telegram 时，配置 Bot 与接收位置（私聊或 Channel），并设置环境变量。步骤见 **[docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md)**：
+
+1. 在 Telegram 找 **@BotFather** → `/newbot` 创建 Bot → 复制 **Token**，设为 `TELEGRAM_BOT_TOKEN`。
+2. **私聊**：给 Bot 发一条消息，用 `getUpdates` 拿到你的 **chat_id**（正数），设为 `TELEGRAM_CHAT_ID`。  
+   **Channel**：创建 Channel，把 Bot 加为管理员，用 `getUpdates` 拿到 Channel 的 **chat_id**（`-100` 开头的负数），设为 `TELEGRAM_CHAT_ID`。
+3. 在 `.env` 或 Railway Variables 中设置上述两个变量即可。
+
 ## 项目开始 To-Do（连接与测试）
 
 按顺序执行以下脚本（无需密钥即可完成 1、3 纸面、4；2 与 3 实盘需配置 `.env`）：
@@ -75,8 +84,9 @@ git push -u origin main
    - `PRIVATE_KEY`：钱包私钥
    - `FUNDER_ADDRESS`：Polymarket 代理钱包地址
    - `PAPER_TRADING`：`true` 为纸面（只打 log），`false` 为实盘
+   - 可选：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`（套利机会推送到 Telegram，见 [docs/TELEGRAM_SETUP.md](docs/TELEGRAM_SETUP.md)）
    - 可选：`API_KEY`、`API_SECRET`、`API_PASSPHRASE`（不填则 L1 自动派生）
-3. 构建与启动：Railway 使用 `requirements.txt` 构建；启动命令已在 `railway.json` 中设为 `python -m src.main`（可在 Dashboard 的 **Settings → Deploy** 中覆盖）。
+3. 构建与启动：Railway 使用 `requirements.txt` 构建；启动命令为 `python -u -m src.main`（`-u` 关闭输出缓冲，Deploy Logs 才能实时看到日志）。建议在 **Variables** 中加 `PYTHONUNBUFFERED=1` 作为备用。
 4. 部署后服务会持续运行主循环；日志在 Railway 控制台查看。
 
 **注意**：实盘需小额资金并确认当地合规；建议先用 `PAPER_TRADING=true` 验证。
