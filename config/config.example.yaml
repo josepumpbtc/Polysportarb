@@ -9,9 +9,16 @@ fee_bps: 0               # 手续费（basis points），按 Polymarket 实际�
 sports_tag_id: null      # Gamma API tag_id，如 100381；null 表示用 /sports 或默认
 events_limit: 50         # 每次拉取 events 数量
 events_offset: 0
-# 测试阶段仅监控 N 个市场；后续可改为 100
-max_markets_monitor: 10
-# 指定监控的 10 个二元市场：交易量 top10，且 0.01 < 概率 < 0.99；若为空则取拉取结果的前 max_markets_monitor 个
+# 监控市场数量（按成交量 top 或 monitor_condition_ids 时生效）
+max_markets_monitor: 100
+# 按成交量 top 时的概率过滤
+top10_min_prob: 0.01
+top10_max_prob: 0.99
+# 每 N 秒在 Deploy Logs 输出【任务状态】与【Workbook】
+status_log_interval_sec: 60
+# 未指定 monitor_condition_ids 时，每 N 秒刷新一次 top 市场（WS 下次重连会订阅新 asset_ids）
+refresh_markets_interval_sec: 1800
+# 指定监控的 10 个二元市场：交易量 top10，且 0.01 < 概率 < 0.99；若为空则按成交量动态取 top N
 monitor_condition_ids:
   - "0x450810ae738a0ff820d3248f2b24937f63fb8c8cf422ed2a915125adb4d9d3c8"  # Andrew Yang 2028 Dem
   - "0xc914317b14972d5d15f30740d3bdf32f4028877c13b9d7ccc78b4ba33f67fb1e"  # Patriots Super Bowl 2026

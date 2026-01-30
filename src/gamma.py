@@ -130,3 +130,62 @@ def fetch_sports_binary_markets(
     """
     events = fetch_events(tag_id=tag_id, closed=False, limit=limit, offset=offset)
     return events_to_binary_markets(events)
+
+
+def fetch_top10_binary_markets_by_volume(
+    events_limit: int = 150,
+    min_prob: float = 0.01,
+    max_prob: float = 0.99,
+    top_n: int = 10,
+) -> List[Dict[str, Any]]:
+    """
+    目的：拉取二元市场后按交易量排序，过滤概率在 (min_prob, max_prob) 内，返回 top N
+    方法：fetch_events 后遍历 markets，取 volume、outcomePrices，过滤已结束与概率，按 volume 降序取前 top_n
+    """
+    import json
+    events = fetch_events(closed=False, limit=events_limit)
+    cands: List[tuple] = []
+    for ev in events:
+        for m in ev.get("markets") or []:
+            if not isinstance(m, dict):
+                continue
+            if _is_market_ended(m, ev):
+                continue
+            tokens = _parse_market_tokens(m)
+            if not tokens:
+                continue
+            cid = m.get("conditionId") or m.get("condition_id") or ""
+            if not cid:
+                continue
+            vol_raw = m.get("volume") or m.get("volumeNum") or m.get("volumeClob") or 0
+            try:
+                vol = float(vol_raw)
+            except (TypeError, ValueError):
+                vol = 0
+            op = m.get("outcomePrices") or m.get("outcome_prices")
+            if isinstance(op, str):
+                try:
+                    op = json.loads(op)
+                except (ValueError, TypeError):
+                    op = []
+            if not isinstance(op, list) or len(op) < 2:
+                continue
+            try:
+                yes_p = float(op[0])
+            except (TypeError, ValueError):
+                yes_p = 0.5
+            if yes_p <= min_prob or yes_p >= max_prob:
+                continue
+            q = m.get("question") or m.get("title") or ""
+            cands.append((vol, cid, tokens["yes"], tokens["no"], q))
+    cands.sort(key=lambda x: -x[0])
+    out: List[Dict[str, Any]] = []
+    for _, cid, ty, tn, q in cands[:top_n]:
+        out.append({
+            "condition_id": cid,
+            "token_id_yes": ty,
+            "token_id_no": tn,
+            "question": q,
+            "event_slug": "",
+        })
+    return out

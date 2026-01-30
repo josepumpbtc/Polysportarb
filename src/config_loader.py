@@ -16,7 +16,11 @@ DEFAULTS: Dict[str, Any] = {
     "min_book_depth": 10.0,
     "volatility_enabled": False,
     "volatility_deviation_pct": 0.05,
-    "max_markets_monitor": 10,  # 测试阶段仅监控 N 个市场；后续可改为 100
+    "max_markets_monitor": 100,  # 监控 N 个市场（按成交量 top 或 monitor_condition_ids）
+    "top10_min_prob": 0.01,
+    "top10_max_prob": 0.99,
+    "status_log_interval_sec": 60.0,  # 每 N 秒在 Deploy Logs 输出任务状态与 Workbook
+    "refresh_markets_interval_sec": 1800.0,  # 未指定 monitor_condition_ids 时，每 N 秒刷新一次 top 市场
     # 默认监控的 10 个二元市场：按交易量 top10，且过滤掉概率 >99% 或 <1%（0.01 < YES < 0.99）
     "monitor_condition_ids": [
         "0x450810ae738a0ff820d3248f2b24937f63fb8c8cf422ed2a915125adb4d9d3c8",  # Andrew Yang 2028 Dem

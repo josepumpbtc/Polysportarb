@@ -3,7 +3,7 @@
 
 import json
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
 # CLOB WebSocket 市场通道地址，用于订阅订单簿与价格
 WSS_MARKET_URL = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
@@ -88,13 +88,13 @@ class OrderBookStore:
 
 def run_websocket_loop(
     store: OrderBookStore,
-    asset_ids: List[str],
+    asset_ids_or_getter: Union[List[str], Callable[[], List[str]]],
     url: str = WSS_MARKET_URL,
     reconnect_delay_sec: float = 5.0,
 ) -> None:
     """
     目的：在后台线程中连接 WebSocket 并持续接收消息，更新 store
-    方法：连接 url，发送订阅消息 {"assets_ids": asset_ids, "type": "MARKET"}，循环 recv 并 store.update_from_message；断线后等待 reconnect_delay_sec 再重连
+    方法：连接 url，发送订阅消息 {"assets_ids": asset_ids, "type": "MARKET"}，循环 recv 并 store.update_from_message；断线后等待 reconnect_delay_sec 再重连；若第二参为可调用对象则每次重连时调用以获取最新 asset_ids，实现定期刷新监控列表
     注意：需在单独线程中调用，否则会阻塞；主程序可用 store 读 best bid/ask
     """
     try:
@@ -102,10 +102,20 @@ def run_websocket_loop(
     except ImportError:
         return
     import time
+
+    def _current_ids() -> List[str]:
+        if callable(asset_ids_or_getter):
+            return list(asset_ids_or_getter())
+        return list(asset_ids_or_getter)
+
     while True:
+        current_ids = _current_ids()
+        if not current_ids:
+            time.sleep(reconnect_delay_sec)
+            continue
         try:
             ws = websocket.create_connection(url)
-            sub = {"assets_ids": [str(a) for a in asset_ids], "type": "MARKET"}
+            sub = {"assets_ids": [str(a) for a in current_ids], "type": "MARKET"}
             ws.send(json.dumps(sub))
             while True:
                 raw = ws.recv()

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.config_loader import load_config
-from src.gamma import fetch_sports_binary_markets
+from src.gamma import fetch_sports_binary_markets, fetch_top10_binary_markets_by_volume
 from src.orderbook import OrderBookStore, run_websocket_loop
 from src.arbitrage import scan_markets_for_arbitrage, ArbitrageSignal
 from src.volatility import scan_markets_for_volatility
@@ -26,6 +26,33 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def log_task_status_and_workbook(
+    store: OrderBookStore,
+    markets: List[Dict[str, Any]],
+    status: str = "运行中",
+) -> None:
+    """目的：在 Deploy Logs 中输出任务状态、监控市场列表、订单簿摘要（Workbook 样子）"""
+    logger.info("【任务状态】%s", status)
+    for i, m in enumerate(markets, 1):
+        cid = m.get("condition_id", "")
+        q = (m.get("question") or "")[:60]
+        logger.info("  市场 %d: condition_id=%s question=%s", i, cid, q)
+    # Workbook 样子：每个市场 YES/NO 的 best bid / best ask
+    logger.info("【Workbook】订单簿快照 (bid/ask)")
+    for m in markets:
+        ty = m.get("token_id_yes")
+        tn = m.get("token_id_no")
+        q = (m.get("question") or "")[:50]
+        by = store.get_best_bid(ty) if ty else None
+        ay = store.get_best_ask(ty) if ty else None
+        bn = store.get_best_bid(tn) if tn else None
+        an = store.get_best_ask(tn) if tn else None
+        logger.info(
+            "  %s | YES bid=%s ask=%s | NO bid=%s ask=%s",
+            q, by, ay, bn, an,
+        )
 
 
 def run_once(
@@ -100,59 +127,106 @@ def main(
             logger.warning("实盘模式但认证失败（缺 PRIVATE_KEY/FUNDER_ADDRESS），改为纸面模式")
             paper = True
 
-    # 拉取体育二元市场（可选 tag_id）
-    tag_id = config.get("sports_tag_id")
-    try:
-        markets = fetch_sports_binary_markets(
-            tag_id=tag_id,
-            limit=config.get("events_limit", 50),
-            offset=config.get("events_offset", 0),
-        )
-    except Exception as e:
-        logger.exception("拉取体育市场失败: %s", e)
-        markets = []
-    if not markets:
-        logger.warning("当前无体育二元市场，将空跑主循环（可手动注入 markets 测试）")
-
-    # 3. 若配置了 monitor_condition_ids 则只监控这 10 个二元市场；否则取前 max_markets_monitor 个
+    # 若配置了 monitor_condition_ids 则只监控这些市场（从体育/全量事件中过滤）；否则按成交量取 top N
     monitor_ids = config.get("monitor_condition_ids") or []
     if isinstance(monitor_ids, str):
         monitor_ids = [monitor_ids]
     monitor_set = {str(cid).strip() for cid in monitor_ids if cid}
+    max_markets = int(config.get("max_markets_monitor", 10))
+
     if monitor_set:
+        # 指定 condition_id：拉体育事件后过滤
+        tag_id = config.get("sports_tag_id")
+        try:
+            markets = fetch_sports_binary_markets(
+                tag_id=tag_id,
+                limit=config.get("events_limit", 50),
+                offset=config.get("events_offset", 0),
+            )
+        except Exception as e:
+            logger.exception("拉取体育市场失败: %s", e)
+            markets = []
         markets = [m for m in markets if m.get("condition_id") in monitor_set]
         logger.info("监控指定 %d 个市场（monitor_condition_ids）", len(markets))
     else:
-        max_markets = int(config.get("max_markets_monitor", 10))
-        markets = markets[:max_markets]
-        logger.info("监控市场数量: %d（max_markets_monitor=%d）", len(markets), max_markets)
+        # 未指定：按成交量 + 概率过滤取 top N，一直是最活跃市场
+        try:
+            markets = fetch_top10_binary_markets_by_volume(
+                events_limit=config.get("events_limit", 150),
+                min_prob=config.get("top10_min_prob", 0.01),
+                max_prob=config.get("top10_max_prob", 0.99),
+                top_n=max_markets,
+            )
+        except Exception as e:
+            logger.exception("拉取 Top 市场失败: %s", e)
+            markets = []
+        logger.info("监控市场数量: %d（按成交量 top，max_markets_monitor=%d）", len(markets), max_markets)
+
+    if not markets:
+        logger.warning("当前无监控市场，将空跑主循环（可清空 monitor_condition_ids 用按成交量 top）")
 
     store = OrderBookStore()
-    # 方法：仅从上述 N 个市场收集 YES/NO token_id，供 WebSocket 订阅
-    asset_ids: List[str] = []
-    for m in markets:
-        asset_ids.append(m["token_id_yes"])
-        asset_ids.append(m["token_id_no"])
-    asset_ids = list(dict.fromkeys(asset_ids))
-    # 启动 WebSocket 线程，持续接收订单簿并更新 store，主循环才能读到 orderbook 并产生套利信号
-    if asset_ids:
-        subscribe_ids = asset_ids
+    # 使用可变列表，便于定期刷新时更新（orderbook 通过 getter 读取，重连时拿到最新 asset_ids）
+    current_markets: List[Dict[str, Any]] = list(markets)
+    current_asset_ids: List[str] = []
+    for m in current_markets:
+        current_asset_ids.append(m["token_id_yes"])
+        current_asset_ids.append(m["token_id_no"])
+    current_asset_ids[:] = list(dict.fromkeys(current_asset_ids))
+
+    def get_asset_ids() -> List[str]:
+        return list(current_asset_ids)
+
+    # Deploy Logs：输出任务状态与监控的市场列表
+    log_task_status_and_workbook(store, current_markets, status="主循环启动前，监控市场列表")
+
+    # 启动 WebSocket 线程，持续接收订单簿并更新 store；传入 getter 以便定期刷新后重连时订阅新 asset_ids
+    if current_asset_ids:
         ws_thread = threading.Thread(
             target=run_websocket_loop,
-            args=(store, subscribe_ids),
+            args=(store, get_asset_ids),
             daemon=True,
             name="orderbook-ws",
         )
         ws_thread.start()
-        logger.info("已启动 orderbook WebSocket，订阅 %d 个 asset_ids", len(subscribe_ids))
-        # 等待首批订单簿数据写入 store，再开始主循环检测
+        logger.info("已启动 orderbook WebSocket，订阅 %d 个 asset_ids", len(current_asset_ids))
         time.sleep(3)
+        log_task_status_and_workbook(store, current_markets, status="首批订单簿已就绪，Workbook 快照")
 
     volatility_detectors: Dict[str, VolatilityDetector] = {}
     logger.info("主循环启动，paper=%s，poll_interval=%.1fs", paper, poll_interval_sec)
+    last_status_log = time.monotonic()
+    last_refresh = time.monotonic()
+    status_log_interval = float(config.get("status_log_interval_sec", 60.0))
+    refresh_interval = float(config.get("refresh_markets_interval_sec", 1800.0))
     try:
         while True:
-            run_once(config, store, markets, paper, client, volatility_detectors)
+            run_once(config, store, current_markets, paper, client, volatility_detectors)
+            now = time.monotonic()
+            if now - last_status_log >= status_log_interval:
+                log_task_status_and_workbook(store, current_markets, status="主循环运行中")
+                last_status_log = now
+            # 未指定 monitor_condition_ids 时，定期刷新 top 市场并更新 current_markets / current_asset_ids
+            if not monitor_set and now - last_refresh >= refresh_interval:
+                try:
+                    new_markets = fetch_top10_binary_markets_by_volume(
+                        events_limit=config.get("events_limit", 150),
+                        min_prob=config.get("top10_min_prob", 0.01),
+                        max_prob=config.get("top10_max_prob", 0.99),
+                        top_n=max_markets,
+                    )
+                    if new_markets:
+                        current_markets.clear()
+                        current_markets.extend(new_markets)
+                        new_ids: List[str] = []
+                        for m in current_markets:
+                            new_ids.append(m["token_id_yes"])
+                            new_ids.append(m["token_id_no"])
+                        current_asset_ids[:] = list(dict.fromkeys(new_ids))
+                        logger.info("已刷新监控市场为 %d 个（按成交量 top），下次 WS 重连将订阅新 asset_ids", len(current_markets))
+                except Exception as e:
+                    logger.exception("刷新 top 市场失败: %s", e)
+                last_refresh = now
             time.sleep(poll_interval_sec)
     except KeyboardInterrupt:
         logger.info("用户中断退出")
